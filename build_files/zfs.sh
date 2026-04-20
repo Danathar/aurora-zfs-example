@@ -49,7 +49,9 @@ done
 # reinstall versions compiled for the new kernel below.
 # --------------------------------------------------------------------------
 for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback; do
-    rpm --erase "${pkg}" --nodeps
+    if rpm -q "${pkg}" >/dev/null 2>&1; then
+        rpm --erase "${pkg}" --nodeps
+    fi
 done
 
 # --------------------------------------------------------------------------
