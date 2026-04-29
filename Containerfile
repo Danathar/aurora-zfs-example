@@ -1,5 +1,5 @@
 # Allow build scripts to be referenced without being copied into the final image
-ARG FEDORA_VERSION=44
+ARG FEDORA_VERSION=43
 FROM scratch AS ctx
 COPY build_files /
 
