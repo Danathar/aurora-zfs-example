@@ -1,4 +1,5 @@
 cosign.key
+.codex
 _build_*
 output
 _build-*/**
