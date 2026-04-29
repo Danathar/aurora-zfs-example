@@ -1,17 +1,22 @@
-# Allow build scripts to be referenced without being copied into the final image
-ARG FEDORA_VERSION=43
+# keep this in sync with aurora or else you will not get any updates
+ARG FEDORA_VERSION=44
+
 FROM scratch AS ctx
 COPY build_files /
 
 # we need this for additional common kmods like v4l2loopback and xone
 # you can omit this and get the kernel-rpms from the akmods-zfs image instead
-FROM ghcr.io/ublue-os/akmods:coreos-stable-${FEDORA_VERSION} AS akmods
+FROM ghcr.io/ublue-os/akmods:coreos-stable-"${FEDORA_VERSION}" AS akmods
 
-FROM ghcr.io/ublue-os/akmods-zfs:coreos-stable-${FEDORA_VERSION} AS akmods-zfs
+# If this breaks because there is a new major kernel release and zfs isn't
+# available yet for that kernel then congratulations you found out why Aurora
+# dropped it. to pin replace with something like
+# akmods:zfs:coreos-stable-43-6.18.13-200.fc43.x86_64
+# https://github.com/ublue-os/akmods/pkgs/container/akmods-zfs
+# if you have to pin keep this in sync with the above if you use it
+FROM ghcr.io/ublue-os/akmods-zfs:coreos-stable-"${FEDORA_VERSION}" AS akmods-zfs
 
-# change the tag to whatever you need here
-# using :latest for demonstration for now because it doesn't have ZFS/coreos-stable kernel
-FROM ghcr.io/ublue-os/aurora:latest AS base
+FROM ghcr.io/ublue-os/aurora:"${FEDORA_VERSION}" AS base
 
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=bind,from=akmods,src=/kernel-rpms,dst=/tmp/kernel-rpms \

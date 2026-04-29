@@ -13,6 +13,15 @@ GitHub Actions workflows: `build.yml`, `build-disk.yml`
 > the upstream Aurora, `akmods`, and `akmods-zfs` inputs line up before moving
 > this example to a new Fedora release.
 
+This should work with base fedora atomic desktop images as well.
+
+[Discussion](https://github.com/ublue-os/aurora/issues/1765)
+
+If you are currently maintaining a fork of this (2026-04-29) to get zfs on
+Aurora, note that `aurora:stable|stable-daily` still have zfs. This will be
+useful as a reference for when Aurora drops zfs in fall 2026 with the Fedora 45
+release.
+
 This repository builds a signed Aurora image with:
 
 - upstream Aurora as the userspace base image
@@ -161,3 +170,4 @@ cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-example:latest
 
 - Aurora discussion: https://github.com/ublue-os/aurora/issues/1765
 - Universal Blue akmods repo: https://github.com/ublue-os/akmods
+- Universal Blue akmods issues: https://github.com/ublue-os/akmods/issues
