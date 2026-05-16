@@ -18,8 +18,8 @@ set -ouex pipefail
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/43/x86_64/repoview/index.html&protocol=https&redirect=1
 
 # "-y" means "answer yes to all prompts" so the install runs unattended
-# during the container build.
-dnf5 install -y tmux
+# during the container build. (example below)
+# dnf5 install -y tmux
 
 # Use a COPR Example:
 # COPRs are community-maintained package repositories (like PPAs on Ubuntu).
