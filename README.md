@@ -1,4 +1,4 @@
-# aurora-zfs-example
+# Aurora developer image with ZFS and NVIDIA
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
 
