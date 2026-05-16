@@ -1,188 +1,93 @@
 # aurora-zfs-example
 
-GitHub Actions workflows: `build.yml`, `build-disk.yml`
+GitHub Actions workflow: `build.yml`
 
-> [!NOTE]
-> This repository is an example implementation, not a maintained product.
->
-> It shows one relatively simple way to build an Aurora NVIDIA Open-based image
-> with ZFS by consuming upstream Universal Blue artifacts instead of running a
-> larger self-hosted akmods pipeline.
->
-> Simpler does not mean safer by itself. The operator still has to check whether
-> the upstream Aurora, `akmods`, `akmods-zfs`, and NVIDIA Open akmods inputs
-> line up before moving this example to a new Fedora release.
+This is a small, GitHub-built Aurora NVIDIA Open image that adds ZFS back using
+upstream Universal Blue akmods artifacts.
 
-This should work with base fedora atomic desktop images as well.
+It is intended for users who already understand ZFS and kernel-module matching.
+It does not include local build helpers, input-check scripts, ISOs, qcow2 files,
+or raw disk images. The expected install path is to rebase an existing Aurora
+install to the published container image.
 
 [Discussion](https://github.com/ublue-os/aurora/issues/1765)
 
-If you are currently maintaining a fork of this (2026-04-29) to get zfs on
-Aurora, note that `aurora:stable|stable-daily` still have zfs. This will be
-useful as a reference for when Aurora drops zfs in fall 2026 with the Fedora 45
-release.
+## What It Uses
 
-This repository builds a signed Aurora NVIDIA Open image with:
-
-- upstream `ghcr.io/ublue-os/aurora-nvidia-open:stable` as the userspace base image
-- kernel RPMs from `ghcr.io/ublue-os/akmods`
-- ZFS RPMs from `ghcr.io/ublue-os/akmods-zfs`
-- NVIDIA Open RPMs from `ghcr.io/ublue-os/akmods-nvidia-open`
-- a direct `Containerfile` build instead of a larger custom build-control layer
-
-The documentation in this repository tries to stay readable for someone who is
-learning these topics while reading.
-
-Every shell script in this repository includes detailed inline comments that
-explain what each command does, why it is there, and how the shell syntax works.
-If you are new to shell scripting, container builds, or kernel module packaging,
-reading the scripts from top to bottom is a good way to learn — they are written
-to teach, not just to run.
-
-## Why This Repo Exists
-
-The goal here is not to automate every edge case.
-The goal is to show a simpler path.
-
-This example assumes upstream Universal Blue already publishes the matching
-parts you need:
-
-1. Aurora NVIDIA Open userspace
-2. common kernel RPMs
-3. matching ZFS RPMs for that kernel stream
-4. matching NVIDIA Open RPMs for that kernel stream
-
-When those pieces line up, this example can stay fairly small.
-When they do not line up, the operator has to wait instead of trying to rebuild
-and publish their own replacement inputs.
-
-## Safety Model
-
-The safety model in this repo is intentionally simpler than a large candidate-
-first pipeline:
-
-1. check whether the upstream inputs line up
-2. if they do, build and test
-3. if they do not, stop and stay on the last working image
-
-This repo now includes a helper for that pre-build check:
-
-- script: [`scripts/check-aurora-zfs-example-inputs.sh`](./scripts/check-aurora-zfs-example-inputs.sh)
-- guide: [`docs/manual-input-check.md`](./docs/manual-input-check.md)
+- base image: `ghcr.io/ublue-os/aurora-nvidia-open:stable`
+- kernel RPMs: `ghcr.io/ublue-os/akmods`
+- ZFS RPMs: `ghcr.io/ublue-os/akmods-zfs`
+- NVIDIA Open RPMs: `ghcr.io/ublue-os/akmods-nvidia-open`
 
 ## Important Design Detail
 
-This example does not keep Aurora's original kernel packages.
+This image does not keep Aurora's original kernel packages.
 
-Its ZFS helper script removes the kernel packages from the Aurora base image and
-installs replacement kernel RPMs from `ghcr.io/ublue-os/akmods`.
-Then it installs ZFS RPMs from `ghcr.io/ublue-os/akmods-zfs`.
-For the NVIDIA Open variant, it also removes the base image's preinstalled
-`kmod-nvidia` package and installs the matching NVIDIA Open kernel module from
-`ghcr.io/ublue-os/akmods-nvidia-open`.
+`build_files/zfs.sh` removes the base kernel and installs the kernel from the
+selected Universal Blue `akmods` stream. It then installs matching ZFS and
+NVIDIA Open kmods from the corresponding upstream akmods images.
 
-That is why the manual input check matters.
-The key question is not just "what Aurora is shipping".
-It is whether these pieces belong together:
+The Fedora release is controlled here:
 
-1. the Aurora base image
-2. the chosen `akmods` stream for that Fedora release
-3. the matching `akmods-zfs` stream for that Fedora release
-4. the matching `akmods-nvidia-open` stream for that Fedora release
+```Dockerfile
+ARG FEDORA_VERSION=44
+```
 
-The base image intentionally tracks the Aurora stable channel:
+The base image intentionally tracks Aurora stable:
 
 ```Dockerfile
 ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
 ARG AURORA_TAG=stable
-ARG FEDORA_VERSION=44
 ```
 
-Because `stable` can eventually move to a new Fedora release before ZFS is
-ready for that release, the `Containerfile` includes a guard that fails the
-build if the base image's Fedora version does not match `FEDORA_VERSION`.
-This lets the image keep receiving stable-channel updates while preventing an
-accidental mixed-release build.
+The `Containerfile` has a guard that fails the build if the stable base image's
+Fedora version does not match `FEDORA_VERSION`.
+
+For the manual release-readiness checklist, see
+[`docs/manual-input-check.md`](./docs/manual-input-check.md).
+
+## Before Moving Fedora Releases
+
+Do not change `FEDORA_VERSION` just because a new Fedora release exists.
+
+Before moving to the next major Fedora release, confirm the matching upstream
+akmods, ZFS, and NVIDIA Open tags exist and publish modules for the same kernel.
+The checklist lives in [`docs/manual-input-check.md`](./docs/manual-input-check.md).
 
 ## Repository Layout
 
 ```text
 Containerfile                         image build definition
 build_files/build.sh                  package and service customization inside the image
-build_files/zfs.sh                    kernel and ZFS RPM installation logic
-scripts/check-aurora-zfs-example-inputs.sh
-                                      helper that checks whether upstream inputs line up
+build_files/zfs.sh                    kernel, NVIDIA Open, and ZFS RPM installation logic
 .github/workflows/build.yml           build and publish the container image
-docs/manual-input-check.md            operator guide for the helper script and manual process
+docs/manual-input-check.md            Fedora release input-check notes
 ```
-
-## Core Workflows
-
-- [`.github/workflows/build.yml`](./.github/workflows/build.yml)
-  - builds and publishes the container image
-  - signs the image on default-branch non-PR runs
-- [`.github/workflows/build-disk.yml`](./.github/workflows/build-disk.yml)
-  - builds disk images from the published container image
-
-Markdown and docs changes do not trigger the main image-build workflow.
-
-## Manual Input Check Before A Fedora Release Change
-
-Before changing this example from one Fedora release to the next, run:
-
-```bash
-./scripts/check-aurora-zfs-example-inputs.sh
-```
-
-That script:
-
-1. detects the Fedora version inside the chosen Aurora image
-2. verifies that the matching `akmods` and `akmods-zfs` images exist
-3. compares the kernel payload in `akmods` against the `kmod-zfs` RPMs in `akmods-zfs`
-
-For the container build itself, the same Fedora release is also used for
-`akmods-nvidia-open` so the replacement NVIDIA Open kernel module matches the
-replacement kernel.
-
-If the script fails:
-
-1. do not move this example to the new Fedora release yet
-2. stay on the last working image
-3. check again later after upstream catches up
-
-If the script passes:
-
-1. update the example if needed
-2. build it
-3. test it
-4. only then deploy it
-
-Full guide:
-
-- [`docs/manual-input-check.md`](./docs/manual-input-check.md)
 
 ## Build And Publish
 
-Container image workflow:
+This repo is built by GitHub Actions.
+
+Manual workflow run:
 
 ```bash
 gh workflow run build.yml
 ```
 
-Local build example:
+The workflow also runs on the default branch according to `.github/workflows/build.yml`.
+It builds and publishes the container image, then signs it on default-branch
+non-PR runs.
+
+## Rebase An Existing Aurora Install
+
+After your image is published to GHCR, rebase an existing Aurora install to the
+custom image. Replace the owner and repository with your fork.
 
 ```bash
-podman build -t aurora-zfs-example:local .
+sudo bootc switch ghcr.io/<owner>/<repo>:latest
 ```
 
-## Quick Validation After Boot
-
-```bash
-rpm -q kmod-zfs
-modinfo zfs | head
-zpool --version
-zfs --version
-```
+Reboot after the switch, then validate ZFS and NVIDIA as you normally would.
 
 ## Signature Verification
 
