@@ -1,5 +1,7 @@
 # aurora-zfs-example
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
+
 GitHub Actions workflow: `build.yml`
 
 This is a small, GitHub-built Aurora NVIDIA Open image that adds ZFS back using
