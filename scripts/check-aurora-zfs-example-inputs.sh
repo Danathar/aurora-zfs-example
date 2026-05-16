@@ -29,7 +29,7 @@ set -euo pipefail
 # The "${VAR:-default}" syntax means: use the value of VAR if it is already
 # set in the environment; otherwise fall back to the default value after ":-".
 # --------------------------------------------------------------------------
-AURORA_IMAGE="${AURORA_IMAGE:-ghcr.io/ublue-os/aurora:latest}"
+AURORA_IMAGE="${AURORA_IMAGE:-ghcr.io/ublue-os/aurora-nvidia-open:stable}"
 AKMODS_STREAM="${AKMODS_STREAM:-coreos-stable}"
 
 # --------------------------------------------------------------------------

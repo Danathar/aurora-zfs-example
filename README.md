@@ -5,13 +5,13 @@ GitHub Actions workflows: `build.yml`, `build-disk.yml`
 > [!NOTE]
 > This repository is an example implementation, not a maintained product.
 >
-> It shows one relatively simple way to build an Aurora-based image with ZFS by
-> consuming upstream Universal Blue artifacts instead of running a larger
-> self-hosted akmods pipeline.
+> It shows one relatively simple way to build an Aurora NVIDIA Open-based image
+> with ZFS by consuming upstream Universal Blue artifacts instead of running a
+> larger self-hosted akmods pipeline.
 >
 > Simpler does not mean safer by itself. The operator still has to check whether
-> the upstream Aurora, `akmods`, and `akmods-zfs` inputs line up before moving
-> this example to a new Fedora release.
+> the upstream Aurora, `akmods`, `akmods-zfs`, and NVIDIA Open akmods inputs
+> line up before moving this example to a new Fedora release.
 
 This should work with base fedora atomic desktop images as well.
 
@@ -22,11 +22,12 @@ Aurora, note that `aurora:stable|stable-daily` still have zfs. This will be
 useful as a reference for when Aurora drops zfs in fall 2026 with the Fedora 45
 release.
 
-This repository builds a signed Aurora image with:
+This repository builds a signed Aurora NVIDIA Open image with:
 
-- upstream Aurora as the userspace base image
+- upstream `ghcr.io/ublue-os/aurora-nvidia-open:stable` as the userspace base image
 - kernel RPMs from `ghcr.io/ublue-os/akmods`
 - ZFS RPMs from `ghcr.io/ublue-os/akmods-zfs`
+- NVIDIA Open RPMs from `ghcr.io/ublue-os/akmods-nvidia-open`
 - a direct `Containerfile` build instead of a larger custom build-control layer
 
 The documentation in this repository tries to stay readable for someone who is
@@ -46,11 +47,12 @@ The goal is to show a simpler path.
 This example assumes upstream Universal Blue already publishes the matching
 parts you need:
 
-1. Aurora userspace
+1. Aurora NVIDIA Open userspace
 2. common kernel RPMs
 3. matching ZFS RPMs for that kernel stream
+4. matching NVIDIA Open RPMs for that kernel stream
 
-When those three things line up, this example can stay fairly small.
+When those pieces line up, this example can stay fairly small.
 When they do not line up, the operator has to wait instead of trying to rebuild
 and publish their own replacement inputs.
 
@@ -75,14 +77,32 @@ This example does not keep Aurora's original kernel packages.
 Its ZFS helper script removes the kernel packages from the Aurora base image and
 installs replacement kernel RPMs from `ghcr.io/ublue-os/akmods`.
 Then it installs ZFS RPMs from `ghcr.io/ublue-os/akmods-zfs`.
+For the NVIDIA Open variant, it also removes the base image's preinstalled
+`kmod-nvidia` package and installs the matching NVIDIA Open kernel module from
+`ghcr.io/ublue-os/akmods-nvidia-open`.
 
 That is why the manual input check matters.
 The key question is not just "what Aurora is shipping".
-It is whether these three pieces belong together:
+It is whether these pieces belong together:
 
 1. the Aurora base image
 2. the chosen `akmods` stream for that Fedora release
 3. the matching `akmods-zfs` stream for that Fedora release
+4. the matching `akmods-nvidia-open` stream for that Fedora release
+
+The base image intentionally tracks the Aurora stable channel:
+
+```Dockerfile
+ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+ARG AURORA_TAG=stable
+ARG FEDORA_VERSION=44
+```
+
+Because `stable` can eventually move to a new Fedora release before ZFS is
+ready for that release, the `Containerfile` includes a guard that fails the
+build if the base image's Fedora version does not match `FEDORA_VERSION`.
+This lets the image keep receiving stable-channel updates while preventing an
+accidental mixed-release build.
 
 ## Repository Layout
 
@@ -119,6 +139,10 @@ That script:
 1. detects the Fedora version inside the chosen Aurora image
 2. verifies that the matching `akmods` and `akmods-zfs` images exist
 3. compares the kernel payload in `akmods` against the `kmod-zfs` RPMs in `akmods-zfs`
+
+For the container build itself, the same Fedora release is also used for
+`akmods-nvidia-open` so the replacement NVIDIA Open kernel module matches the
+replacement kernel.
 
 If the script fails:
 

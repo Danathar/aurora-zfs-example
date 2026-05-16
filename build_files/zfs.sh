@@ -48,7 +48,11 @@ done
 # against the old kernel and will not work with the new one.  We will
 # reinstall versions compiled for the new kernel below.
 # --------------------------------------------------------------------------
-for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback; do
+# Also remove the pre-installed NVIDIA kernel module when building from an
+# NVIDIA-flavored Aurora image. It was compiled for the base image's original
+# kernel; after we replace the kernel below, we install the matching NVIDIA
+# Open module from ghcr.io/ublue-os/akmods-nvidia-open.
+for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback kmod-nvidia; do
     if rpm -q "${pkg}" >/dev/null 2>&1; then
         rpm --erase "${pkg}" --nodeps
     fi
@@ -151,6 +155,16 @@ KERNEL=$(basename "$(find /usr/lib/modules -maxdepth 1 -mindepth 1 -type d | sor
 if [[ -z "${KERNEL}" ]]; then
     echo "ERROR: No kernel directory found in /usr/lib/modules" >&2
     exit 1
+fi
+
+# Install the NVIDIA Open kernel module RPM that matches the replacement
+# kernel. The NVIDIA userspace packages come from the NVIDIA Open akmods image
+# too, so they stay aligned with the kmod package.
+if compgen -G "/tmp/rpms/nvidia-kmods/kmod-nvidia-${KERNEL}*.rpm" >/dev/null; then
+    dnf5 -y install \
+        /tmp/rpms/nvidia-kmods/kmod-nvidia-"${KERNEL}"*.rpm \
+        /tmp/rpms/nvidia/*.x86_64.rpm \
+        /tmp/rpms/nvidia/*.noarch.rpm
 fi
 
 # =========================================================================
