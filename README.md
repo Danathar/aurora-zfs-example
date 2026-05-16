@@ -177,6 +177,9 @@ cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-example:latest
 
 ## References
 
+- Aurora repo: https://github.com/ublue-os/aurora
 - Aurora discussion: https://github.com/ublue-os/aurora/issues/1765
 - Universal Blue akmods repo: https://github.com/ublue-os/akmods
 - Universal Blue akmods issues: https://github.com/ublue-os/akmods/issues
+- NVIDIA open GPU kernel modules repo: https://github.com/NVIDIA/open-gpu-kernel-modules
+
