@@ -54,7 +54,10 @@ This image does not keep Aurora's original kernel packages.
 
 `build_files/zfs.sh` removes the base kernel and installs the kernel from the
 selected Universal Blue `akmods` stream. It then installs matching ZFS and
-NVIDIA Open kmods from the corresponding upstream akmods images.
+NVIDIA Open kmods from the corresponding upstream akmods images. These usually
+line up with the base image already, but reinstalling them from the selected
+stream ensures the kernel, ZFS, and NVIDIA Open module RPMs all come from the
+same matching Universal Blue akmods inputs.
 
 For NVIDIA Open builds, the build also verifies that the core NVIDIA userspace
 driver packages match the installed `kmod-nvidia` version. NVIDIA-adjacent
