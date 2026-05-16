@@ -14,6 +14,33 @@ install to the published container image.
 
 [Discussion](https://github.com/ublue-os/aurora/issues/1765)
 
+## Switching To This Image
+
+After the GitHub Actions workflow publishes your fork's image, switch an
+existing Aurora install to it:
+
+```bash
+sudo bootc switch ghcr.io/<owner>/<repo>:latest
+```
+
+For this repository, that would be:
+
+```bash
+sudo bootc switch ghcr.io/danathar/aurora-zfs-simple:latest
+```
+
+Reboot after switching.
+
+## Switching Back To Upstream
+
+To go back to upstream Aurora NVIDIA Open stable:
+
+```bash
+sudo bootc switch ghcr.io/ublue-os/aurora-nvidia-open:stable
+```
+
+Reboot after switching back.
+
 ## What It Uses
 
 - base image: `ghcr.io/ublue-os/aurora-nvidia-open:stable`
