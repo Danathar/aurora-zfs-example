@@ -56,6 +56,11 @@ This image does not keep Aurora's original kernel packages.
 selected Universal Blue `akmods` stream. It then installs matching ZFS and
 NVIDIA Open kmods from the corresponding upstream akmods images.
 
+For NVIDIA Open builds, the build also verifies that the core NVIDIA userspace
+driver packages match the installed `kmod-nvidia` version. NVIDIA-adjacent
+packages with unrelated versioning, such as firmware or container-toolkit
+packages, are not part of that version check.
+
 The Fedora release is controlled here:
 
 ```Dockerfile

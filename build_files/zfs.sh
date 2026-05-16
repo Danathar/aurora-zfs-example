@@ -165,6 +165,53 @@ if compgen -G "/tmp/rpms/nvidia-kmods/kmod-nvidia-${KERNEL}*.rpm" >/dev/null; th
         /tmp/rpms/nvidia-kmods/kmod-nvidia-"${KERNEL}"*.rpm \
         /tmp/rpms/nvidia/*.x86_64.rpm \
         /tmp/rpms/nvidia/*.noarch.rpm
+
+    if compgen -G "/tmp/rpms/ublue-os/*.rpm" >/dev/null; then
+        dnf5 -y install /tmp/rpms/ublue-os/*.rpm
+    fi
+
+    # Fail the build if the core NVIDIA userspace packages do not match the
+    # installed NVIDIA kernel module version.  Some NVIDIA-adjacent packages
+    # intentionally have unrelated versions (firmware, container toolkit,
+    # libva-nvidia-driver), so this only checks the driver stack packages that
+    # should move together with kmod-nvidia.
+    mapfile -t NVIDIA_KMOD_VERSIONS < <(rpm -q --qf '%{VERSION}-%{RELEASE}\n' kmod-nvidia | sort -u)
+    if [[ "${#NVIDIA_KMOD_VERSIONS[@]}" -ne 1 ]]; then
+        printf 'ERROR: expected exactly one kmod-nvidia version, found:\n' >&2
+        printf '  %s\n' "${NVIDIA_KMOD_VERSIONS[@]}" >&2
+        exit 1
+    fi
+    NVIDIA_DRIVER_VERSION="${NVIDIA_KMOD_VERSIONS[0]}"
+
+    NVIDIA_DRIVER_PACKAGES=(
+        libnvidia-cfg
+        libnvidia-fbc
+        libnvidia-gpucomp
+        libnvidia-ml
+        nvidia-driver
+        nvidia-driver-cuda
+        nvidia-driver-cuda-libs
+        nvidia-driver-libs
+        nvidia-kmod-common
+        nvidia-libXNVCtrl
+        nvidia-modprobe
+        nvidia-persistenced
+        nvidia-settings
+        nvidia-xconfig
+        xorg-x11-nvidia
+    )
+
+    for pkg in "${NVIDIA_DRIVER_PACKAGES[@]}"; do
+        if rpm -q "${pkg}" >/dev/null 2>&1; then
+            mapfile -t pkg_versions < <(rpm -q --qf '%{VERSION}-%{RELEASE}\n' "${pkg}" | sort -u)
+            if [[ "${#pkg_versions[@]}" -ne 1 || "${pkg_versions[0]}" != "${NVIDIA_DRIVER_VERSION}" ]]; then
+                printf 'ERROR: %s does not match kmod-nvidia version %s\n' "${pkg}" "${NVIDIA_DRIVER_VERSION}" >&2
+                printf '  %s versions found:\n' "${pkg}" >&2
+                printf '    %s\n' "${pkg_versions[@]}" >&2
+                exit 1
+            fi
+        fi
+    done
 fi
 
 # =========================================================================
