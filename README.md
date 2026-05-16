@@ -2,14 +2,13 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
 
-GitHub Actions workflow: `build.yml`
+[![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
 
 This is a small, GitHub-built Aurora DX NVIDIA Open developer image that adds ZFS back using
 upstream Universal Blue akmods artifacts.
 
 It is intended for users who already understand ZFS and kernel-module matching.
-It does not include local build helpers, input-check scripts, ISOs, qcow2 files,
-or raw disk images. The expected install path is to rebase an existing Aurora
+The expected install path is to rebase an existing Aurora
 install to the published container image.
 
 [Discussion](https://github.com/ublue-os/aurora/issues/1765)
