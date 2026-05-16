@@ -1,7 +1,7 @@
 # keep this in sync with aurora or else you will not get any updates
 ARG FEDORA_VERSION=44
 ARG AURORA_TAG=stable
-ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open
 
 FROM scratch AS ctx
 COPY build_files /

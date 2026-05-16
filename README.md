@@ -4,7 +4,7 @@
 
 GitHub Actions workflow: `build.yml`
 
-This is a small, GitHub-built Aurora NVIDIA Open image that adds ZFS back using
+This is a small, GitHub-built Aurora DX NVIDIA Open developer image that adds ZFS back using
 upstream Universal Blue akmods artifacts.
 
 It is intended for users who already understand ZFS and kernel-module matching.
@@ -33,17 +33,17 @@ Reboot after switching.
 
 ## Switching Back To Upstream
 
-To go back to upstream Aurora NVIDIA Open stable:
+To go back to upstream Aurora DX NVIDIA Open stable:
 
 ```bash
-sudo bootc switch ghcr.io/ublue-os/aurora-nvidia-open:stable
+sudo bootc switch ghcr.io/ublue-os/aurora-dx-nvidia-open:stable
 ```
 
 Reboot after switching back.
 
 ## What It Uses
 
-- base image: `ghcr.io/ublue-os/aurora-nvidia-open:stable`
+- base image: `ghcr.io/ublue-os/aurora-dx-nvidia-open:stable`
 - kernel RPMs: `ghcr.io/ublue-os/akmods`
 - ZFS RPMs: `ghcr.io/ublue-os/akmods-zfs`
 - NVIDIA Open RPMs: `ghcr.io/ublue-os/akmods-nvidia-open`
@@ -67,10 +67,10 @@ The Fedora release is controlled here:
 ARG FEDORA_VERSION=44
 ```
 
-The base image intentionally tracks Aurora stable:
+The base image intentionally tracks Aurora DX NVIDIA Open stable:
 
 ```Dockerfile
-ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open
 ARG AURORA_TAG=stable
 ```
 
@@ -90,12 +90,12 @@ The checklist lives in [`docs/manual-input-check.md`](./docs/manual-input-check.
 
 ## Non-NVIDIA Users
 
-If you do not need NVIDIA, make this a plain Aurora + ZFS image:
+If you do not need NVIDIA but still want the developer image, make this an Aurora DX + ZFS image:
 
 1. In `Containerfile`, change the base image:
 
    ```Dockerfile
-   ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora
+   ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-dx
    ```
 
 2. Remove the NVIDIA Open akmods stage:
@@ -104,11 +104,12 @@ If you do not need NVIDIA, make this a plain Aurora + ZFS image:
    FROM ghcr.io/ublue-os/akmods-nvidia-open:coreos-stable-"${FEDORA_VERSION}"-x86_64 AS akmods-nvidia-open
    ```
 
-3. Remove the two NVIDIA mount lines from the first `RUN`:
+3. Remove the NVIDIA mount lines from the first `RUN`:
 
    ```Dockerfile
    --mount=type=bind,from=akmods-nvidia-open,src=/rpms/kmods,dst=/tmp/rpms/nvidia-kmods \
    --mount=type=bind,from=akmods-nvidia-open,src=/rpms/nvidia,dst=/tmp/rpms/nvidia \
+   --mount=type=bind,from=akmods-nvidia-open,src=/rpms/ublue-os,dst=/tmp/rpms/ublue-os \
    ```
 
 4. In `build_files/zfs.sh`, remove `kmod-nvidia` from the package-removal loop
@@ -117,7 +118,7 @@ If you do not need NVIDIA, make this a plain Aurora + ZFS image:
 After that, the only release-readiness inputs you need to check are:
 
 ```text
-ghcr.io/ublue-os/aurora:stable
+ghcr.io/ublue-os/aurora-dx:stable
 ghcr.io/ublue-os/akmods:coreos-stable-N-x86_64
 ghcr.io/ublue-os/akmods-zfs:coreos-stable-N-x86_64
 ```

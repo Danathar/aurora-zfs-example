@@ -9,7 +9,7 @@ the Universal Blue package tags yourself.
 For a Fedora release `N`, these inputs need to exist and line up:
 
 ```text
-ghcr.io/ublue-os/aurora-nvidia-open:stable
+ghcr.io/ublue-os/aurora-dx-nvidia-open:stable
 ghcr.io/ublue-os/akmods:coreos-stable-N-x86_64
 ghcr.io/ublue-os/akmods-zfs:coreos-stable-N-x86_64
 ghcr.io/ublue-os/akmods-nvidia-open:coreos-stable-N-x86_64
@@ -46,13 +46,13 @@ working image.
 
 ## Base Image Guard
 
-The base image tracks Aurora stable:
+The base image tracks Aurora DX NVIDIA Open stable:
 
 ```Dockerfile
-ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open
+ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open
 ARG AURORA_TAG=stable
 ```
 
-The `Containerfile` fails the build if `aurora-nvidia-open:stable` has moved to
+The `Containerfile` fails the build if `aurora-dx-nvidia-open:stable` has moved to
 a different Fedora release than `FEDORA_VERSION`. That prevents accidentally
 building a mixed-release image while still allowing stable-channel updates.
