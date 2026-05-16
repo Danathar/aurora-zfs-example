@@ -54,6 +54,40 @@ Before moving to the next major Fedora release, confirm the matching upstream
 akmods, ZFS, and NVIDIA Open tags exist and publish modules for the same kernel.
 The checklist lives in [`docs/manual-input-check.md`](./docs/manual-input-check.md).
 
+## Non-NVIDIA Users
+
+If you do not need NVIDIA, make this a plain Aurora + ZFS image:
+
+1. In `Containerfile`, change the base image:
+
+   ```Dockerfile
+   ARG AURORA_IMAGE=ghcr.io/ublue-os/aurora
+   ```
+
+2. Remove the NVIDIA Open akmods stage:
+
+   ```Dockerfile
+   FROM ghcr.io/ublue-os/akmods-nvidia-open:coreos-stable-"${FEDORA_VERSION}"-x86_64 AS akmods-nvidia-open
+   ```
+
+3. Remove the two NVIDIA mount lines from the first `RUN`:
+
+   ```Dockerfile
+   --mount=type=bind,from=akmods-nvidia-open,src=/rpms/kmods,dst=/tmp/rpms/nvidia-kmods \
+   --mount=type=bind,from=akmods-nvidia-open,src=/rpms/nvidia,dst=/tmp/rpms/nvidia \
+   ```
+
+4. In `build_files/zfs.sh`, remove `kmod-nvidia` from the package-removal loop
+   and remove the NVIDIA Open install block.
+
+After that, the only release-readiness inputs you need to check are:
+
+```text
+ghcr.io/ublue-os/aurora:stable
+ghcr.io/ublue-os/akmods:coreos-stable-N-x86_64
+ghcr.io/ublue-os/akmods-zfs:coreos-stable-N-x86_64
+```
+
 ## Repository Layout
 
 ```text
