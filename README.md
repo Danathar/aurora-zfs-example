@@ -150,6 +150,15 @@ The workflow also runs on the default branch according to `.github/workflows/bui
 It builds and publishes the container image, then signs it on default-branch
 non-PR runs.
 
+Scheduled builds run weekly on Sunday morning at 05:00 UTC, which is about
+1:00 AM Eastern during daylight time. This keeps the image refreshed before a
+typical early-morning systemd pull timer without staging a new deployment every
+day.
+
+If Aurora or the upstream Universal Blue akmods images publish an important
+update during the week, deciding whether to run an out-of-schedule manual build
+is up to you.
+
 ## Rebase An Existing Aurora Install
 
 After your image is published to GHCR, rebase an existing Aurora install to the
