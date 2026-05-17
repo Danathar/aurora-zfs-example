@@ -93,6 +93,32 @@ if compgen -G "/tmp/rpms/nvidia-kmods/kmod-nvidia-${KERNEL}*.rpm" >/dev/null; th
             fi
         fi
     done
+
+    # Aurora's NVIDIA install flow edits the RPM-owned dracut config so the
+    # NVIDIA driver is force-loaded into the generated initramfs. Reinstalling
+    # the NVIDIA RPMs above can restore the package default (`omit_drivers`),
+    # so reapply only those upstream dracut edits before the final
+    # dracut build below. Other Aurora NVIDIA integration is inherited from the
+    # base image and is not re-run here.
+    NVIDIA_DRACUT_CONF=/usr/lib/dracut/dracut.conf.d/99-nvidia.conf
+    if [[ ! -f "${NVIDIA_DRACUT_CONF}" ]]; then
+        printf 'ERROR: expected NVIDIA dracut config at %s\n' "${NVIDIA_DRACUT_CONF}" >&2
+        exit 1
+    fi
+
+    sed -i 's@omit_drivers@force_drivers@g' "${NVIDIA_DRACUT_CONF}"
+    if ! grep -q 'i915 amdgpu nvidia' "${NVIDIA_DRACUT_CONF}"; then
+        sed -i 's@ nvidia @ i915 amdgpu nvidia @g' "${NVIDIA_DRACUT_CONF}"
+    fi
+
+    if ! grep -q force_drivers "${NVIDIA_DRACUT_CONF}"; then
+        printf 'ERROR: %s does not force-load NVIDIA drivers\n' "${NVIDIA_DRACUT_CONF}" >&2
+        exit 1
+    fi
+    if ! grep -q 'i915 amdgpu nvidia' "${NVIDIA_DRACUT_CONF}"; then
+        printf 'ERROR: %s does not preload i915/amdgpu before NVIDIA\n' "${NVIDIA_DRACUT_CONF}" >&2
+        exit 1
+    fi
 fi
 
 # Install ZFS kmod and userspace packages for the replacement kernel.
