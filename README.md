@@ -123,6 +123,8 @@ If you do not need NVIDIA but still want the developer image, make this an Auror
 4. In `build_files/zfs.sh`, remove `kmod-nvidia` from the package-removal loop
    and remove the NVIDIA Open install block.
 
+5. In `build_files/post-check.sh`, remove the NVIDIA validation block.
+
 After that, the only release-readiness inputs you need to check are:
 
 ```text
@@ -136,6 +138,7 @@ ghcr.io/ublue-os/akmods-zfs:coreos-stable-N-x86_64
 ```text
 Containerfile                         image build definition
 build_files/build.sh                  package and service customization inside the image
+build_files/post-check.sh             final image validation for kernel, ZFS, and NVIDIA
 build_files/zfs.sh                    kernel, NVIDIA Open, and ZFS RPM installation logic
 .github/workflows/build.yml           build and publish the container image
 docs/manual-input-check.md            Fedora release input-check notes
@@ -163,6 +166,34 @@ day.
 If Aurora or the upstream Universal Blue akmods images publish an important
 update during the week, deciding whether to run an out-of-schedule manual build
 is up to you.
+
+## Build-Time Validation
+
+Before `bootc container lint`, the `Containerfile` runs
+`build_files/post-check.sh`. This is a fail-fast consistency check for the final
+image. It is intended to catch cases where RPM metadata says something is
+installed but the files needed at boot are missing.
+
+The post-check verifies:
+
+- exactly one kernel module tree exists under `/usr/lib/modules`
+- the kernel RPM and module tree agree on the selected kernel version
+- ZFS RPMs, userspace commands, shared libraries, systemd units, udev rules, and
+  module-load config are present
+- `spl.ko` and `zfs.ko` exist for the selected kernel
+- `modinfo -k <kernel> spl` and `modinfo -k <kernel> zfs` work after `depmod`
+- NVIDIA kernel modules, userspace packages, commands, and shared libraries are
+  present
+- `modinfo -k <kernel>` works for the NVIDIA modules
+- the NVIDIA dracut config force-loads NVIDIA and preloads `i915 amdgpu nvidia`
+- the generated initramfs contains ZFS and NVIDIA modules
+- critical kmod RPM payload files are not missing or content-modified, while
+  harmless rpm-ostree/bootc ownership/group/timestamp normalization is ignored
+
+These checks do not prove that a real pool imports or a real GPU works because
+the GitHub runner does not provide those host devices to the image build. They
+do verify that the image contains the expected kernel modules, userspace tools,
+libraries, and boot integration before it is published.
 
 ## Rebase An Existing Aurora Install
 
