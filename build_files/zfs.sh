@@ -18,6 +18,26 @@ for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback kmod-nvidia
     fi
 done
 
+# Remove any inherited ZFS RPMs before deleting /usr/lib/modules. If the base
+# image already has ZFS installed, removing the module tree without erasing the
+# RPM first leaves rpmdb entries behind but no zfs.ko/spl.ko files. A later
+# `dnf5 install` then reports kmod-zfs as "already installed" and does not
+# restore the missing modules.
+mapfile -t EXISTING_ZFS_PACKAGES < <(
+    rpm -qa \
+        'kmod-zfs' \
+        'zfs' \
+        'libnvpair*' \
+        'libuutil*' \
+        'libzfs*' \
+        'libzpool*' \
+        'python3-pyzfs' \
+        | sort -u
+)
+if [[ "${#EXISTING_ZFS_PACKAGES[@]}" -gt 0 ]]; then
+    rpm --erase "${EXISTING_ZFS_PACKAGES[@]}" --nodeps
+fi
+
 rm -rf /usr/lib/modules
 
 dnf5 -y install \
@@ -137,6 +157,21 @@ dnf5 -y install "${ZFS_RPMS[@]}"
 
 # Register modules and build an initramfs for the replacement kernel.
 depmod -a -v "${KERNEL}"
+
+ZFS_MODULE_DIR="/usr/lib/modules/${KERNEL}/extra/zfs"
+for module in spl zfs; do
+    if ! compgen -G "${ZFS_MODULE_DIR}/${module}.ko*" >/dev/null; then
+        printf 'ERROR: expected %s module under %s after installing kmod-zfs\n' "${module}" "${ZFS_MODULE_DIR}" >&2
+        rpm -ql kmod-zfs >&2 || true
+        exit 1
+    fi
+
+    if ! modinfo -k "${KERNEL}" "${module}" >/dev/null 2>&1; then
+        printf 'ERROR: modinfo cannot find %s for kernel %s after depmod\n' "${module}" "${KERNEL}" >&2
+        exit 1
+    fi
+done
+
 echo "zfs" >/usr/lib/modules-load.d/zfs.conf
 
 export DRACUT_NO_XATTR=1
