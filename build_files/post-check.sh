@@ -120,8 +120,11 @@ require_command "zfs"
 require_command "zpool"
 require_command "zdb"
 require_command "zed"
-zfs --version >/dev/null
-zpool --version >/dev/null
+# Do not run `zfs --version` or `zpool --version` here. OpenZFS version
+# commands can try to query the kernel module version, but the image build
+# container is not booted with this image's kernel modules loaded. Package,
+# binary, library, module-file, and `modinfo -k` checks are the build-safe
+# userspace validation.
 
 require_ldd_resolved "$(command -v zfs)"
 require_ldd_resolved "$(command -v zpool)"
