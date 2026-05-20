@@ -8,6 +8,18 @@
 # hardware or loaded kernel modules. In particular, avoid commands like
 # `zpool status`, `zfs --version`, or `nvidia-smi` because those can query the
 # running build container's kernel/devices rather than the image being produced.
+#
+# Execution order is defined in main() at the bottom of the file:
+# 1. check_kernel_tree
+# 2. check_zfs_packages
+# 3. check_zfs_modules
+# 4. check_zfs_userspace
+# 5. check_nvidia_packages
+# 6. check_nvidia_modules
+# 7. check_nvidia_userspace
+# 8. check_nvidia_dracut_config
+# 9. check_initramfs
+# 10. check_rpm_payloads
 
 set -euo pipefail
 
