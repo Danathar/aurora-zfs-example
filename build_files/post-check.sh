@@ -157,7 +157,9 @@ done
 
 require_command "nvidia-smi"
 require_command "nvidia-modprobe"
-nvidia-smi --version >/dev/null
+# Do not run `nvidia-smi` here. The image build container does not have a real
+# NVIDIA device or this image's NVIDIA kernel modules loaded, so nvidia-smi can
+# fail even when the userspace binary and libraries are correctly installed.
 
 require_ldd_resolved "$(command -v nvidia-smi)"
 require_ldd_resolved "$(command -v nvidia-modprobe)"
