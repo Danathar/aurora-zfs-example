@@ -1,13 +1,18 @@
 #!/usr/bin/bash
-# Validate that the finished image contains a coherent kernel, ZFS, and NVIDIA
-# stack before CI publishes it.
+# Purpose:
+#   Validate that the finished image contains a coherent kernel, ZFS, and NVIDIA
+#   stack before CI publishes it. Any failure here should block publishing.
 #
-# This script intentionally runs inside the image build, not on a booted machine.
-# That means it can inspect the assembled filesystem, RPM database, module tree,
-# generated initramfs, and userspace binaries, but it must not depend on runtime
-# hardware or loaded kernel modules. In particular, avoid commands like
-# `zpool status`, `zfs --version`, or `nvidia-smi` because those can query the
-# running build container's kernel/devices rather than the image being produced.
+# Scope:
+#   This script intentionally runs inside the image build, not on a booted
+#   machine. It can inspect the assembled filesystem, RPM database, module tree,
+#   generated initramfs, and userspace binaries, but it must not depend on
+#   runtime hardware or loaded kernel modules.
+#
+# Not tested here:
+#   Real ZFS pool import, `zpool status`, `zfs --version`, runtime `nvidia-smi`,
+#   GPU containers, Flatpak NVIDIA runtime sync, and SELinux/runtime service
+#   behavior. Those belong in post-rebase checks on the actual booted machine.
 #
 # Execution order is defined in main() at the bottom of the file:
 # 1. check_kernel_tree
@@ -20,6 +25,19 @@
 # 8. check_nvidia_dracut_config
 # 9. check_initramfs
 # 10. check_rpm_payloads
+#
+# Shared state:
+#   KERNEL
+#     Selected image kernel version, derived from the single directory under
+#     /usr/lib/modules by check_kernel_tree().
+#   INITRAMFS_LIST
+#     Text output from lsinitrd for /usr/lib/modules/${KERNEL}/initramfs.img,
+#     captured by check_initramfs() so it is read once and searched repeatedly.
+#
+# Maintenance:
+#   If upstream package names, module paths, library names, or dracut config
+#   locations change, update the matching check_* function instead of weakening
+#   the whole post-check.
 
 set -euo pipefail
 
