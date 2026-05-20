@@ -180,10 +180,12 @@ The post-check verifies:
 - the kernel RPM and module tree agree on the selected kernel version
 - ZFS RPMs, userspace commands, shared libraries, systemd units, udev rules, and
   module-load config are present
+- ZFS kmod, userspace, and libraries report one OpenZFS version/release
 - `spl.ko` and `zfs.ko` exist for the selected kernel
 - `modinfo -k <kernel> spl` and `modinfo -k <kernel> zfs` work after `depmod`
 - NVIDIA kernel modules, userspace packages, commands, and shared libraries are
   present
+- core NVIDIA kmod and userspace packages report one driver version/release
 - `modinfo -k <kernel>` works for the NVIDIA modules
 - the NVIDIA dracut config force-loads NVIDIA and preloads `i915 amdgpu nvidia`
 - the generated initramfs contains ZFS and NVIDIA modules
@@ -318,7 +320,7 @@ But still: I should have bought an AMD card.
 ## Signature Verification
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-example:latest
+cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-simple:latest
 ```
 
 ## References

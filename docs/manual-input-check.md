@@ -76,7 +76,11 @@ podman run --rm --pull=always \
   "ghcr.io/ublue-os/akmods-zfs:${AKMODS_TAG}" \
   -lc '
     echo "ZFS kmods:"
-    rpm -qp --qf "%{NAME} %{VERSION}-%{RELEASE}\n" /rpms/kmods/zfs/kmod-zfs-*.rpm
+    for rpm in /rpms/kmods/zfs/kmod-zfs-*.rpm; do
+      basename "${rpm}"
+      rpm -qp --qf "  %{NAME} %{VERSION}-%{RELEASE}\n" "${rpm}"
+      rpm -qpl "${rpm}" | grep "/lib/modules/"
+    done
 
     echo
     echo "ZFS userspace:"
@@ -107,7 +111,11 @@ podman run --rm --pull=always \
   "ghcr.io/ublue-os/akmods-nvidia-open:${AKMODS_TAG}" \
   -lc '
     echo "NVIDIA kmods:"
-    rpm -qp --qf "%{NAME} %{VERSION}-%{RELEASE}\n" /rpms/kmods/kmod-nvidia-*.rpm
+    for rpm in /rpms/kmods/kmod-nvidia-*.rpm; do
+      basename "${rpm}"
+      rpm -qp --qf "  %{NAME} %{VERSION}-%{RELEASE}\n" "${rpm}"
+      rpm -qpl "${rpm}" | grep "/lib/modules/"
+    done
 
     echo
     echo "NVIDIA userspace:"

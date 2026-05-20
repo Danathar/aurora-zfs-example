@@ -63,20 +63,40 @@ require_ldd_resolved() {
 verify_rpm_payload() {
     local pkg=$1
     local verify_output
+    local line
+    local flags
 
     # rpm-ostree/bootc images can normalize ownership, group, or timestamps in
     # ways that make plain `rpm -V` too noisy. Treat missing files, content
     # changes, mode changes, symlink changes, device changes, and capability
     # changes as failures, but ignore owner/group/timestamp-only differences.
     verify_output=$(rpm -V "${pkg}" 2>&1 || true)
-    if grep -q '^missing' <<<"${verify_output}"; then
-        printf '%s\n' "${verify_output}" >&2
-        fail "RPM verification found missing files for ${pkg}"
-    fi
+    while IFS= read -r line; do
+        [[ -z "${line}" ]] && continue
 
-    if grep -Eq '^[SM5DLP]' <<<"${verify_output}"; then
-        printf '%s\n' "${verify_output}" >&2
-        fail "RPM verification found payload changes for ${pkg}"
+        if [[ "${line}" == missing* ]]; then
+            printf '%s\n' "${verify_output}" >&2
+            fail "RPM verification found missing files for ${pkg}"
+        fi
+
+        flags=${line:0:9}
+        if [[ "${flags}" =~ [SM5DLP] ]]; then
+            printf '%s\n' "${verify_output}" >&2
+            fail "RPM verification found payload changes for ${pkg}"
+        fi
+    done <<<"${verify_output}"
+}
+
+require_single_rpm_version() {
+    local description=$1
+    shift
+    local versions
+
+    mapfile -t versions < <(rpm -q --qf '%{VERSION}-%{RELEASE}\n' "$@" | sort -u)
+    if [[ "${#versions[@]}" -ne 1 ]]; then
+        printf 'post-check: %s versions found:\n' "${description}" >&2
+        printf '  %s\n' "${versions[@]}" >&2
+        fail "expected exactly one ${description} version"
     fi
 }
 
@@ -108,6 +128,14 @@ require_rpm_glob "libnvpair" "libnvpair*"
 require_rpm_glob "libuutil" "libuutil*"
 require_rpm_glob "libzfs" "libzfs*"
 require_rpm_glob "libzpool" "libzpool*"
+
+mapfile -t ZFS_VERSIONED_PACKAGES < <(
+    {
+        printf '%s\n' kmod-zfs zfs python3-pyzfs
+        rpm -qa 'libnvpair[0-9]*' 'libuutil[0-9]*' 'libzfs[0-9]*' 'libzpool[0-9]*'
+    } | sort -u
+)
+require_single_rpm_version "ZFS" "${ZFS_VERSIONED_PACKAGES[@]}"
 
 require_glob "spl kernel module" "/usr/lib/modules/${KERNEL}/extra/zfs/spl.ko*"
 require_glob "zfs kernel module" "/usr/lib/modules/${KERNEL}/extra/zfs/zfs.ko*"
@@ -149,6 +177,18 @@ require_rpm "nvidia-kmod-common"
 require_rpm "nvidia-modprobe"
 require_rpm "nvidia-persistenced"
 require_rpm "libnvidia-ml"
+
+require_single_rpm_version \
+    "NVIDIA driver" \
+    kmod-nvidia \
+    libnvidia-ml \
+    nvidia-driver \
+    nvidia-driver-libs \
+    nvidia-driver-cuda \
+    nvidia-driver-cuda-libs \
+    nvidia-kmod-common \
+    nvidia-modprobe \
+    nvidia-persistenced
 
 for module in nvidia nvidia-drm nvidia-modeset nvidia-uvm; do
     require_glob "${module} kernel module" "/usr/lib/modules/${KERNEL}/extra/nvidia/${module}.ko*"
