@@ -195,8 +195,8 @@ check_kernel_tree() {
     KERNEL=$(basename "${kernel_dirs[0]}")
     log "selected kernel: ${KERNEL}"
 
-    # These are the core Fedora kernel packages expected after zfs.sh replaces the
-    # base image kernel with the selected Universal Blue akmods kernel.
+    # These are the core Fedora kernel packages expected after kernel-akmods.sh
+    # replaces the base image kernel with the selected Universal Blue akmods kernel.
     require_rpm "kernel-core"
     require_rpm "kernel-modules"
     require_rpm "kernel-modules-core"
@@ -350,7 +350,7 @@ check_nvidia_dracut_config() {
     log "checking NVIDIA dracut config"
 
     # The NVIDIA RPM-owned dracut config can be reset by reinstalling packages.
-    # zfs.sh should reapply Aurora/Universal Blue's desired behavior: force-load
+    # nvidia.sh should reapply Aurora/Universal Blue's desired behavior: force-load
     # NVIDIA and preload integrated GPU drivers first.
     local nvidia_dracut_conf=/usr/lib/dracut/dracut.conf.d/99-nvidia.conf
     require_file "${nvidia_dracut_conf}"

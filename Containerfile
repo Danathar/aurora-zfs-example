@@ -35,6 +35,8 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=bind,from=akmods-nvidia-open,src=/rpms/nvidia,dst=/tmp/rpms/nvidia \
     --mount=type=bind,from=akmods-nvidia-open,src=/rpms/ublue-os,dst=/tmp/rpms/ublue-os \
     --mount=type=bind,from=akmods-zfs,src=/rpms/kmods/zfs,dst=/tmp/rpms/kmods/zfs \
+    /ctx/kernel-akmods.sh && \
+    /ctx/nvidia.sh && \
     /ctx/zfs.sh
 
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
