@@ -51,12 +51,13 @@ Reboot after switching back.
 
 This image does not keep Aurora's original kernel packages.
 
-`build_files/zfs.sh` removes the base kernel and installs the kernel from the
-selected Universal Blue `akmods` stream. It then installs matching ZFS and
-NVIDIA Open kmods from the corresponding upstream akmods images. These usually
-line up with the base image already, but reinstalling them from the selected
-stream ensures the kernel, ZFS, and NVIDIA Open module RPMs all come from the
-same matching Universal Blue akmods inputs.
+`build_files/kernel-akmods.sh` removes the base kernel and installs the kernel
+from the selected Universal Blue `akmods` stream. `build_files/nvidia.sh` and
+`build_files/zfs.sh` then install matching NVIDIA Open and ZFS kmods from the
+corresponding upstream akmods images. These usually line up with the base image
+already, but reinstalling them from the selected stream ensures the kernel, ZFS,
+and NVIDIA Open module RPMs all come from the same matching Universal Blue
+akmods inputs.
 
 For NVIDIA Open builds, the build also verifies that the core NVIDIA userspace
 driver packages match the installed `kmod-nvidia` version. NVIDIA-adjacent
@@ -64,10 +65,11 @@ packages with unrelated versioning, such as firmware or container-toolkit
 packages, are not part of that version check.
 
 The NVIDIA RPM reinstall can restore NVIDIA's RPM-owned dracut config to its
-package default. Before generating the final initramfs, `build_files/zfs.sh`
-reapplies Aurora/Universal Blue's NVIDIA dracut behavior so the NVIDIA driver is
-force-loaded and the integrated GPU drivers are preloaded first. The build fails
-if that dracut config is missing or does not contain the expected settings.
+package default. Before `build_files/zfs.sh` generates the final initramfs,
+`build_files/nvidia.sh` reapplies Aurora/Universal Blue's NVIDIA dracut behavior
+so the NVIDIA driver is force-loaded and the integrated GPU drivers are
+preloaded first. The build fails if that dracut config is missing or does not
+contain the expected settings.
 
 The Fedora release is controlled here:
 
@@ -120,10 +122,12 @@ If you do not need NVIDIA but still want the developer image, make this an Auror
    --mount=type=bind,from=akmods-nvidia-open,src=/rpms/ublue-os,dst=/tmp/rpms/ublue-os \
    ```
 
-4. In `build_files/zfs.sh`, remove `kmod-nvidia` from the package-removal loop
-   and remove the NVIDIA Open install block.
+4. In `build_files/kernel-akmods.sh`, remove `kmod-nvidia` from the
+   package-removal loop.
 
-5. In `build_files/post-check.sh`, remove the NVIDIA validation block.
+5. Remove the `build_files/nvidia.sh` call from the first `RUN`.
+
+6. In `build_files/post-check.sh`, remove the NVIDIA validation block.
 
 After that, the only release-readiness inputs you need to check are:
 
@@ -138,8 +142,10 @@ ghcr.io/ublue-os/akmods-zfs:coreos-stable-N-x86_64
 ```text
 Containerfile                         image build definition
 build_files/build.sh                  package and service customization inside the image
+build_files/kernel-akmods.sh          kernel replacement and common akmods installation
+build_files/nvidia.sh                 NVIDIA Open RPM installation and dracut config fixups
 build_files/post-check.sh             final image validation for kernel, ZFS, and NVIDIA
-build_files/zfs.sh                    kernel, NVIDIA Open, and ZFS RPM installation logic
+build_files/zfs.sh                    ZFS RPM installation and final initramfs generation
 .github/workflows/build.yml           build and publish the container image
 docs/manual-input-check.md            Fedora release input-check notes
 ```
