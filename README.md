@@ -64,6 +64,12 @@ driver packages match the installed `kmod-nvidia` version. NVIDIA-adjacent
 packages with unrelated versioning, such as firmware or container-toolkit
 packages, are not part of that version check.
 
+NVIDIA packaging layouts can change between driver releases. For example, NVML
+may be shipped by the legacy `libnvidia-ml` RPM or by `nvidia-driver-common`.
+The validation checks for a coherent NVIDIA driver stack and the actual
+`libnvidia-ml.so` library instead of depending on only one historical package
+split.
+
 The NVIDIA RPM reinstall can restore NVIDIA's RPM-owned dracut config to its
 package default. Before `build_files/zfs.sh` generates the final initramfs,
 `build_files/nvidia.sh` reapplies Aurora/Universal Blue's NVIDIA dracut behavior

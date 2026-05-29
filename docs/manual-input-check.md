@@ -132,6 +132,8 @@ Good signs:
 - the `kmod-nvidia` RPM filename includes the expected kernel version
 - core NVIDIA userspace packages show the same NVIDIA driver version/release as
   `kmod-nvidia`
+- NVML is present through either the legacy `libnvidia-ml` package split or the
+  newer `nvidia-driver-common` package layout
 - there is not a mixture of old and new NVIDIA driver releases in the same
   artifact
 
