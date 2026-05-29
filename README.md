@@ -28,6 +28,13 @@ For this repository, that would be:
 sudo bootc switch ghcr.io/danathar/aurora-zfs-simple:latest
 ```
 
+If your host's container signature policy is configured to trust your fork's
+signing key, prefer enforcing it during the switch:
+
+```bash
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/<owner>/<repo>:latest
+```
+
 Reboot after switching.
 
 ## Switching Back To Upstream
@@ -35,7 +42,7 @@ Reboot after switching.
 To go back to upstream Aurora DX NVIDIA Open stable:
 
 ```bash
-sudo bootc switch ghcr.io/ublue-os/aurora-dx-nvidia-open:stable
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/ublue-os/aurora-dx-nvidia-open:stable
 ```
 
 Reboot after switching back.
@@ -216,6 +223,13 @@ custom image. Replace the owner and repository with your fork.
 
 ```bash
 sudo bootc switch ghcr.io/<owner>/<repo>:latest
+```
+
+If the target host has a container signature policy configured for your fork's
+signing key, prefer:
+
+```bash
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/<owner>/<repo>:latest
 ```
 
 Reboot after the switch, then validate ZFS and NVIDIA as you normally would.
