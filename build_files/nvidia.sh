@@ -42,6 +42,7 @@ NVIDIA_DRIVER_PACKAGES=(
     libnvidia-gpucomp
     libnvidia-ml
     nvidia-driver
+    nvidia-driver-common
     nvidia-driver-cuda
     nvidia-driver-cuda-libs
     nvidia-driver-libs

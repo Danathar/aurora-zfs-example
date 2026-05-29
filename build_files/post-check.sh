@@ -287,6 +287,7 @@ check_zfs_userspace() {
 
 check_nvidia_packages() {
     log "checking NVIDIA packages"
+    local nvidia_versioned_packages
 
     # Required core NVIDIA Open driver packages. This intentionally checks only the
     # driver stack packages with matching driver version semantics, not unrelated
@@ -299,22 +300,32 @@ check_nvidia_packages() {
     require_rpm "nvidia-kmod-common"
     require_rpm "nvidia-modprobe"
     require_rpm "nvidia-persistenced"
-    require_rpm "libnvidia-ml"
+
+    # NVIDIA packaging can either ship NVML as its own libnvidia-ml RPM or as
+    # payload from nvidia-driver-common. Accept either package layout here; the
+    # userspace check below still verifies that libnvidia-ml.so is present.
+    nvidia_versioned_packages=(
+        kmod-nvidia
+        nvidia-driver
+        nvidia-driver-libs
+        nvidia-driver-cuda
+        nvidia-driver-cuda-libs
+        nvidia-kmod-common
+        nvidia-modprobe
+        nvidia-persistenced
+    )
+    if rpm -q "libnvidia-ml" >/dev/null 2>&1; then
+        nvidia_versioned_packages+=(libnvidia-ml)
+    elif rpm -q "nvidia-driver-common" >/dev/null 2>&1; then
+        nvidia_versioned_packages+=(nvidia-driver-common)
+    else
+        fail "required NVIDIA NVML provider RPM is not installed: expected libnvidia-ml or nvidia-driver-common"
+    fi
 
     # Verify the core NVIDIA userspace packages match the installed kmod-nvidia
     # VERSION-RELEASE. A mismatch here can produce a working-looking image where
     # nvidia-smi, CUDA, or the kernel driver fail after boot.
-    require_single_rpm_version \
-        "NVIDIA driver" \
-        kmod-nvidia \
-        libnvidia-ml \
-        nvidia-driver \
-        nvidia-driver-libs \
-        nvidia-driver-cuda \
-        nvidia-driver-cuda-libs \
-        nvidia-kmod-common \
-        nvidia-modprobe \
-        nvidia-persistenced
+    require_single_rpm_version "NVIDIA driver" "${nvidia_versioned_packages[@]}"
 }
 
 check_nvidia_modules() {
