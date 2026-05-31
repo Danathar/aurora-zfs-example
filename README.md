@@ -2,7 +2,18 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
 
-[![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
+> [!WARNING]
+> This branch is the archived NVIDIA version of this repo. It is not
+> maintained, and GitHub Actions have intentionally been disabled on this
+> branch. It worked the last time it was used before the AMD/non-NVIDIA `main`
+> migration on 2026-05-31, but it may stop building or working as upstream
+> Aurora, kernel, ZFS, or NVIDIA inputs change. The maintained AMD/non-NVIDIA
+> image now lives on `main`. The pre-archive commit is tagged
+> `nvidia-last-known-good-2026-05-31`.
+
+> [!IMPORTANT]
+> After `main` publishes again, `ghcr.io/danathar/aurora-zfs-simple:latest`
+> refers to the AMD/non-NVIDIA image, not this archived NVIDIA branch.
 
 This is a small, GitHub-built Aurora DX NVIDIA Open developer image that adds ZFS back using
 upstream Universal Blue akmods artifacts.
@@ -159,32 +170,19 @@ build_files/kernel-akmods.sh          kernel replacement and common akmods insta
 build_files/nvidia.sh                 NVIDIA Open RPM installation and dracut config fixups
 build_files/post-check.sh             final image validation for kernel, ZFS, and NVIDIA
 build_files/zfs.sh                    ZFS RPM installation and final initramfs generation
-.github/workflows/build.yml           build and publish the container image
+.github/workflows/build.yml.disabled  disabled historical build workflow
 docs/manual-input-check.md            Fedora release input-check notes
 ```
 
 ## Build And Publish
 
-This repo is built by GitHub Actions.
+GitHub Actions are intentionally disabled on this branch. The historical
+workflow is retained as `.github/workflows/build.yml.disabled` for reference
+only.
 
-Manual workflow run:
-
-```bash
-gh workflow run build.yml
-```
-
-The workflow also runs on the default branch according to `.github/workflows/build.yml`.
-It builds and publishes the container image, then signs it on default-branch
-non-PR runs.
-
-Scheduled builds run weekly on Sunday morning at 05:00 UTC, which is about
-1:00 AM Eastern during daylight time. This keeps the image refreshed before a
-typical early-morning systemd pull timer without staging a new deployment every
-day.
-
-If Aurora or the upstream Universal Blue akmods images publish an important
-update during the week, deciding whether to run an out-of-schedule manual build
-is up to you.
+Do not expect this branch to publish a current NVIDIA image. If you revive this
+branch, audit all upstream Aurora, kernel, ZFS, and NVIDIA inputs first, then
+rename the workflow back to `.github/workflows/build.yml` and test deliberately.
 
 ## Build-Time Validation
 
