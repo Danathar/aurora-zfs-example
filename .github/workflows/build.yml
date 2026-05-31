@@ -70,7 +70,7 @@ jobs:
             type=ref,event=pr
           labels: |
             org.opencontainers.image.created=${{ steps.date.outputs.date }}
-            org.opencontainers.image.description=Aurora DX NVIDIA Open image with ZFS support
+            org.opencontainers.image.description=Aurora DX image with ZFS support
             org.opencontainers.image.documentation=https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}/${{ github.sha }}/README.md
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}/blob/${{ github.sha }}/Containerfile
             org.opencontainers.image.title=${{ env.IMAGE_NAME }}

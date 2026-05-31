@@ -12,8 +12,8 @@ for pkg in kernel kernel{-core,-modules,-modules-core,-modules-extra}; do
 done
 
 # Remove kmods compiled for the base-image kernel; matching versions are installed below
-# or by the dedicated NVIDIA/ZFS scripts that run after the replacement kernel is in place.
-for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback kmod-nvidia; do
+# or by the dedicated ZFS script that runs after the replacement kernel is in place.
+for pkg in kmod-xone xone-kmod-common kmod-v4l2loopback v4l2loopback; do
     if rpm -q "${pkg}" >/dev/null 2>&1; then
         rpm --erase "${pkg}" --nodeps
     fi

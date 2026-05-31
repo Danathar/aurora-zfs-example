@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Purpose:
-#   Validate that the finished image contains a coherent kernel, ZFS, and NVIDIA
-#   stack before CI publishes it. Any failure here should block publishing.
+#   Validate that the finished image contains a coherent kernel and ZFS stack
+#   before CI publishes it. Any failure here should block publishing.
 #
 # Scope:
 #   This script intentionally runs inside the image build, not on a booted
@@ -10,34 +10,16 @@
 #   runtime hardware or loaded kernel modules.
 #
 # Not tested here:
-#   Real ZFS pool import, `zpool status`, `zfs --version`, runtime `nvidia-smi`,
-#   GPU containers, Flatpak NVIDIA runtime sync, and SELinux/runtime service
-#   behavior. Those belong in post-rebase checks on the actual booted machine.
+#   Real ZFS pool import, `zpool status`, and `zfs --version`. Those belong in
+#   post-rebase checks on the actual booted machine.
 #
 # Execution order is defined in main() at the bottom of the file:
 # 1. check_kernel_tree
 # 2. check_zfs_packages
 # 3. check_zfs_modules
 # 4. check_zfs_userspace
-# 5. check_nvidia_packages
-# 6. check_nvidia_modules
-# 7. check_nvidia_userspace
-# 8. check_nvidia_dracut_config
-# 9. check_initramfs
-# 10. check_rpm_payloads
-#
-# Shared state:
-#   KERNEL
-#     Selected image kernel version, derived from the single directory under
-#     /usr/lib/modules by check_kernel_tree().
-#   INITRAMFS_LIST
-#     Text output from lsinitrd for /usr/lib/modules/${KERNEL}/initramfs.img,
-#     captured by check_initramfs() so it is read once and searched repeatedly.
-#
-# Maintenance:
-#   If upstream package names, module paths, library names, or dracut config
-#   locations change, update the matching check_* function instead of weakening
-#   the whole post-check.
+# 5. check_initramfs
+# 6. check_rpm_payloads
 
 set -euo pipefail
 
@@ -58,15 +40,12 @@ fail() {
 
 require_command() {
     # Verify an expected userspace command exists somewhere in PATH.
-    # This only checks presence; runtime behavior may still require real devices
-    # or loaded kernel modules and is intentionally left for post-rebase checks.
     local cmd=$1
     command -v "${cmd}" >/dev/null 2>&1 || fail "required command not found: ${cmd}"
 }
 
 require_file() {
-    # Verify an exact path exists. This is used for files that should have a
-    # stable location in the final image, such as systemd units or initramfs.
+    # Verify an exact path exists.
     local path=$1
     [[ -e "${path}" ]] || fail "required file not found: ${path}"
 }
@@ -119,24 +98,8 @@ require_ldd_resolved() {
 
 verify_rpm_payload() {
     # Verify critical kmod RPM payloads are not missing or content-modified.
-    #
     # Plain `rpm -V` is too strict for rpm-ostree/bootc images because file
-    # owner, group, and timestamps may be normalized during image assembly. Those
-    # differences are noisy and not evidence that a module is broken.
-    #
-    # We do fail on:
-    # - missing files
-    # - size changes (S)
-    # - mode changes (M)
-    # - checksum/content changes (5)
-    # - device major/minor changes (D)
-    # - symlink target changes (L)
-    # - capabilities changes (P)
-    #
-    # We ignore:
-    # - user owner differences (U)
-    # - group owner differences (G)
-    # - mtime differences (T)
+    # owner, group, and timestamps may be normalized during image assembly.
     local pkg=$1
     local verify_output
     local line
@@ -164,7 +127,7 @@ verify_rpm_payload() {
 require_single_rpm_version() {
     # Verify a group of RPMs all report the same VERSION-RELEASE. This catches
     # split stacks like kmod-zfs from one OpenZFS release but libzfs/zfs from
-    # another, or kmod-nvidia/userspace driver skew.
+    # another.
     local description=$1
     shift
     local versions
@@ -190,13 +153,9 @@ check_kernel_tree() {
         fail "expected exactly one kernel module directory, found ${#kernel_dirs[@]}"
     fi
 
-    # Use the module directory as the source of truth for the kernel version that
-    # dracut and modinfo should validate.
     KERNEL=$(basename "${kernel_dirs[0]}")
     log "selected kernel: ${KERNEL}"
 
-    # These are the core Fedora kernel packages expected after kernel-akmods.sh
-    # replaces the base image kernel with the selected Universal Blue akmods kernel.
     require_rpm "kernel-core"
     require_rpm "kernel-modules"
     require_rpm "kernel-modules-core"
@@ -212,8 +171,6 @@ check_kernel_tree() {
 check_zfs_packages() {
     log "checking ZFS packages"
 
-    # Required ZFS packages. The exact ABI-numbered library package names can change
-    # over time, so libraries are checked with RPM globs below.
     require_rpm "zfs"
     require_rpm "kmod-zfs"
     require_rpm "python3-pyzfs"
@@ -222,9 +179,7 @@ check_zfs_packages() {
     require_rpm_glob "libzfs" "libzfs*"
     require_rpm_glob "libzpool" "libzpool*"
 
-    # Confirm all ZFS components come from one OpenZFS VERSION-RELEASE. This is
-    # mostly defensive because zfs.sh installs them from the same akmods-zfs artifact,
-    # but it catches stale or mixed RPMs if upstream contents or local globs change.
+    # Confirm all ZFS components come from one OpenZFS VERSION-RELEASE.
     local zfs_versioned_packages
     mapfile -t zfs_versioned_packages < <(
         {
@@ -238,15 +193,11 @@ check_zfs_packages() {
 check_zfs_modules() {
     log "checking ZFS kernel modules"
 
-    # Check that the actual ZFS module files exist for the selected kernel. This
-    # catches the earlier bug where RPM metadata said kmod-zfs was installed but
-    # zfs.ko/spl.ko had been deleted with /usr/lib/modules.
     require_glob "spl kernel module" "/usr/lib/modules/${KERNEL}/extra/zfs/spl.ko*"
     require_glob "zfs kernel module" "/usr/lib/modules/${KERNEL}/extra/zfs/zfs.ko*"
 
-    # Rebuild module dependency metadata and verify modinfo can resolve the ZFS
-    # modules for the image kernel. `modinfo -k` is safe at build time because it
-    # reads module files for the named kernel; it does not load the module.
+    # `modinfo -k` is safe at build time because it reads module files for the
+    # named kernel; it does not load the module.
     depmod -a "${KERNEL}"
     modinfo -k "${KERNEL}" spl >/dev/null 2>&1 || fail "modinfo cannot find spl for ${KERNEL}"
     modinfo -k "${KERNEL}" zfs >/dev/null 2>&1 || fail "modinfo cannot find zfs for ${KERNEL}"
@@ -255,25 +206,17 @@ check_zfs_modules() {
 check_zfs_userspace() {
     log "checking ZFS userspace and integration files"
 
-    # ZFS userspace commands should be present. Do not execute commands that query
-    # pool or kernel state; the build container is not the final booted system.
     require_command "zfs"
     require_command "zpool"
     require_command "zdb"
     require_command "zed"
     # Do not run `zfs --version` or `zpool --version` here. OpenZFS version
     # commands can try to query the kernel module version, but the image build
-    # container is not booted with this image's kernel modules loaded. Package,
-    # binary, library, module-file, and `modinfo -k` checks are the build-safe
-    # userspace validation.
+    # container is not booted with this image's kernel modules loaded.
 
-    # Verify key ZFS binaries can find their shared libraries.
     require_ldd_resolved "$(command -v zfs)"
     require_ldd_resolved "$(command -v zpool)"
 
-    # Check the boot/integration files that should be present after installing ZFS.
-    # These checks do not guarantee a real pool imports, but they catch missing units,
-    # udev rules, or module-load config before publishing the image.
     require_file "/usr/lib/modules-load.d/zfs.conf"
     grep -qx 'zfs' /usr/lib/modules-load.d/zfs.conf || fail "/usr/lib/modules-load.d/zfs.conf does not contain exactly 'zfs'"
     require_file "/usr/lib/systemd/system-generators/zfs-mount-generator"
@@ -285,109 +228,20 @@ check_zfs_userspace() {
     require_file "/usr/lib/udev/rules.d/90-zfs.rules"
 }
 
-check_nvidia_packages() {
-    log "checking NVIDIA packages"
-    local nvidia_versioned_packages
-
-    # Required core NVIDIA Open driver packages. This intentionally checks only the
-    # driver stack packages with matching driver version semantics, not unrelated
-    # NVIDIA-adjacent packages such as firmware or container-toolkit pieces.
-    require_rpm "kmod-nvidia"
-    require_rpm "nvidia-driver"
-    require_rpm "nvidia-driver-libs"
-    require_rpm "nvidia-driver-cuda"
-    require_rpm "nvidia-driver-cuda-libs"
-    require_rpm "nvidia-kmod-common"
-    require_rpm "nvidia-modprobe"
-    require_rpm "nvidia-persistenced"
-
-    # NVIDIA packaging can either ship NVML as its own libnvidia-ml RPM or as
-    # payload from nvidia-driver-common. Accept either package layout here; the
-    # userspace check below still verifies that libnvidia-ml.so is present.
-    nvidia_versioned_packages=(
-        kmod-nvidia
-        nvidia-driver
-        nvidia-driver-libs
-        nvidia-driver-cuda
-        nvidia-driver-cuda-libs
-        nvidia-kmod-common
-        nvidia-modprobe
-        nvidia-persistenced
-    )
-    if rpm -q "libnvidia-ml" >/dev/null 2>&1; then
-        nvidia_versioned_packages+=(libnvidia-ml)
-    elif rpm -q "nvidia-driver-common" >/dev/null 2>&1; then
-        nvidia_versioned_packages+=(nvidia-driver-common)
-    else
-        fail "required NVIDIA NVML provider RPM is not installed: expected libnvidia-ml or nvidia-driver-common"
-    fi
-
-    # Verify the core NVIDIA userspace packages match the installed kmod-nvidia
-    # VERSION-RELEASE. A mismatch here can produce a working-looking image where
-    # nvidia-smi, CUDA, or the kernel driver fail after boot.
-    require_single_rpm_version "NVIDIA driver" "${nvidia_versioned_packages[@]}"
-}
-
-check_nvidia_modules() {
-    log "checking NVIDIA kernel modules"
-
-    # Check NVIDIA module files and module metadata for the selected image kernel.
-    # As with ZFS, modinfo reads metadata and does not require a GPU or loaded module.
-    local module
-    for module in nvidia nvidia-drm nvidia-modeset nvidia-uvm; do
-        require_glob "${module} kernel module" "/usr/lib/modules/${KERNEL}/extra/nvidia/${module}.ko*"
-        modinfo -k "${KERNEL}" "${module}" >/dev/null 2>&1 || fail "modinfo cannot find ${module} for ${KERNEL}"
-    done
-}
-
-check_nvidia_userspace() {
-    log "checking NVIDIA userspace"
-
-    # NVIDIA userspace commands should exist, but do not run nvidia-smi in the build.
-    require_command "nvidia-smi"
-    require_command "nvidia-modprobe"
-    # Do not run `nvidia-smi` here. The image build container does not have a real
-    # NVIDIA device or this image's NVIDIA kernel modules loaded, so nvidia-smi can
-    # fail even when the userspace binary and libraries are correctly installed.
-
-    # Verify key NVIDIA binaries and libraries exist and link correctly.
-    require_ldd_resolved "$(command -v nvidia-smi)"
-    require_ldd_resolved "$(command -v nvidia-modprobe)"
-    require_glob "libnvidia-ml" "/usr/lib64/libnvidia-ml.so*"
-    require_glob "libcuda" "/usr/lib64/libcuda.so*"
-}
-
-check_nvidia_dracut_config() {
-    log "checking NVIDIA dracut config"
-
-    # The NVIDIA RPM-owned dracut config can be reset by reinstalling packages.
-    # nvidia.sh should reapply Aurora/Universal Blue's desired behavior: force-load
-    # NVIDIA and preload integrated GPU drivers first.
-    local nvidia_dracut_conf=/usr/lib/dracut/dracut.conf.d/99-nvidia.conf
-    require_file "${nvidia_dracut_conf}"
-    grep -q force_drivers "${nvidia_dracut_conf}" || fail "${nvidia_dracut_conf} does not force-load NVIDIA drivers"
-    grep -q 'i915 amdgpu nvidia' "${nvidia_dracut_conf}" || fail "${nvidia_dracut_conf} does not preload i915/amdgpu before NVIDIA"
-}
-
 check_initramfs() {
     log "checking initramfs contents"
 
-    # Verify the initramfs was generated and contains both stacks. This catches cases
+    # Verify the initramfs was generated and contains ZFS. This catches cases
     # where RPMs and modules exist on disk but the boot image would be missing them.
     require_file "/usr/lib/modules/${KERNEL}/initramfs.img"
     INITRAMFS_LIST=$(lsinitrd "/usr/lib/modules/${KERNEL}/initramfs.img")
     grep -q 'zfs\.ko' <<<"${INITRAMFS_LIST}" || fail "initramfs does not contain zfs.ko"
-    grep -q 'nvidia\.ko' <<<"${INITRAMFS_LIST}" || fail "initramfs does not contain nvidia.ko"
 }
 
 check_rpm_payloads() {
     log "checking RPM file verification for critical kmods"
 
-    # Final payload sanity check for the two kmod RPMs that matter most to this repo.
-    # This catches missing or altered module files even if earlier path/glob checks
-    # accidentally missed a future packaging layout change.
     verify_rpm_payload "kmod-zfs"
-    verify_rpm_payload "kmod-nvidia"
 }
 
 main() {
@@ -396,11 +250,6 @@ main() {
     check_zfs_packages
     check_zfs_modules
     check_zfs_userspace
-
-    check_nvidia_packages
-    check_nvidia_modules
-    check_nvidia_userspace
-    check_nvidia_dracut_config
 
     check_initramfs
     check_rpm_payloads

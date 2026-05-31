@@ -25,8 +25,8 @@ ZFS_RPMS=(
 
 dnf5 -y install "${ZFS_RPMS[@]}"
 
-# Register modules and build an initramfs for the replacement kernel after all
-# kmods, including NVIDIA from nvidia.sh, have been installed.
+# Register modules and build an initramfs for the replacement kernel after
+# ZFS and common kmods have been installed.
 depmod -a -v "${KERNEL}"
 
 ZFS_MODULE_DIR="/usr/lib/modules/${KERNEL}/extra/zfs"
