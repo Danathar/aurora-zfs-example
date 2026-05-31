@@ -24,10 +24,10 @@ artifact, check that it contains one coherent OpenZFS release for `kmod-zfs`,
 
 ## How To Check The Inputs
 
-These checks can be run from any shell where you have `skopeo` and `podman`
-available. They inspect upstream Universal Blue artifact images before you edit
-`Containerfile` and push a Fedora release bump to GitHub; they do not require a
-local clone of this repository.
+These checks can be run from any shell where you have `skopeo`, `podman`, and
+`rpm` available. The akmods artifact images are RPM payload containers and may
+not contain a shell, so inspect them by copying the RPM directories out with
+`podman cp` instead of running commands inside the container.
 
 Set the Fedora release you want to inspect:
 
@@ -43,13 +43,25 @@ skopeo inspect "docker://ghcr.io/ublue-os/akmods:${AKMODS_TAG}" >/dev/null
 skopeo inspect "docker://ghcr.io/ublue-os/akmods-zfs:${AKMODS_TAG}" >/dev/null
 ```
 
+Copy the RPM payloads to a temporary directory:
+
+```bash
+tmpdir=$(mktemp -d)
+
+akmods_cid=$(podman create "ghcr.io/ublue-os/akmods:${AKMODS_TAG}")
+podman cp "${akmods_cid}:/kernel-rpms" "${tmpdir}/kernel-rpms"
+podman rm "${akmods_cid}" >/dev/null
+
+zfs_cid=$(podman create "ghcr.io/ublue-os/akmods-zfs:${AKMODS_TAG}")
+podman cp "${zfs_cid}:/rpms/kmods/zfs" "${tmpdir}/zfs-rpms"
+podman rm "${zfs_cid}" >/dev/null
+```
+
 Check the kernel version published by the base akmods artifact:
 
 ```bash
-podman run --rm --pull=always \
-  --entrypoint /usr/bin/bash \
-  "ghcr.io/ublue-os/akmods:${AKMODS_TAG}" \
-  -lc 'rpm -qp --qf "%{VERSION}-%{RELEASE}.%{ARCH}\n" /kernel-rpms/kernel-core-*.rpm'
+rpm -qp --qf "%{VERSION}-%{RELEASE}.%{ARCH}\n" \
+  "${tmpdir}"/kernel-rpms/kernel-core-*.rpm
 ```
 
 Save that value as the kernel you expect ZFS to match. For example:
@@ -62,28 +74,23 @@ Check that the ZFS artifact has a kmod for that exact kernel and one coherent
 OpenZFS userspace release:
 
 ```bash
-podman run --rm --pull=always \
-  --entrypoint /usr/bin/bash \
-  "ghcr.io/ublue-os/akmods-zfs:${AKMODS_TAG}" \
-  -lc '
-    echo "ZFS kmods:"
-    for rpm in /rpms/kmods/zfs/kmod-zfs-*.rpm; do
-      basename "${rpm}"
-      rpm -qp --qf "  %{NAME} %{VERSION}-%{RELEASE}\n" "${rpm}"
-      rpm -qpl "${rpm}" | grep "/lib/modules/"
-    done
+echo "ZFS kmods:"
+for rpm in "${tmpdir}"/zfs-rpms/kmod-zfs-*.rpm; do
+  basename "${rpm}"
+  rpm -qp --qf "  %{NAME} %{VERSION}-%{RELEASE}\n" "${rpm}"
+  rpm -qpl "${rpm}" | grep "/lib/modules/"
+done
 
-    echo
-    echo "ZFS userspace:"
-    rpm -qp --qf "%{NAME} %{VERSION}-%{RELEASE}\n" \
-      /rpms/kmods/zfs/zfs-*.rpm \
-      /rpms/kmods/zfs/libzfs*.rpm \
-      /rpms/kmods/zfs/libzpool*.rpm \
-      /rpms/kmods/zfs/libnvpair*.rpm \
-      /rpms/kmods/zfs/libuutil*.rpm \
-      /rpms/kmods/zfs/python3-pyzfs-*.rpm \
-      | sort -u
-  '
+echo
+echo "ZFS userspace:"
+rpm -qp --qf "%{NAME} %{VERSION}-%{RELEASE}\n" \
+  "${tmpdir}"/zfs-rpms/zfs-*.rpm \
+  "${tmpdir}"/zfs-rpms/libzfs*.rpm \
+  "${tmpdir}"/zfs-rpms/libzpool*.rpm \
+  "${tmpdir}"/zfs-rpms/libnvpair*.rpm \
+  "${tmpdir}"/zfs-rpms/libuutil*.rpm \
+  "${tmpdir}"/zfs-rpms/python3-pyzfs-*.rpm \
+  | sort -u
 ```
 
 Good signs:
@@ -92,6 +99,12 @@ Good signs:
 - `kmod-zfs`, `zfs`, the ZFS libraries, and `python3-pyzfs` show the same
   OpenZFS version/release
 - there is not a mixture of old and new OpenZFS releases in the same artifact
+
+Clean up the temporary directory when done:
+
+```bash
+rm -rf "${tmpdir}"
+```
 
 After these manual checks, still let GitHub Actions build the image. The build's
 `post-check.sh` performs the final validation against the actual assembled image

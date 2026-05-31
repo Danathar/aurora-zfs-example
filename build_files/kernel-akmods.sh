@@ -7,8 +7,12 @@ set -eoux pipefail
 ### aurora 02-install-common-kernel-akmods.sh ###
 
 # Replace base-image kernel RPMs with the kernel from the selected akmods stream.
-for pkg in kernel kernel{-core,-modules,-modules-core,-modules-extra}; do
-    rpm --erase "${pkg}" --nodeps
+# Include kernel-devel packages so developer tooling does not keep stale headers
+# from the Aurora base image after the runtime kernel has been replaced.
+for pkg in kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel kernel-devel-matched; do
+    if rpm -q "${pkg}" >/dev/null 2>&1; then
+        rpm --erase "${pkg}" --nodeps
+    fi
 done
 
 # Remove kmods compiled for the base-image kernel; matching versions are installed below
@@ -44,6 +48,8 @@ rm -rf /usr/lib/modules
 dnf5 -y install \
     /tmp/kernel-rpms/kernel-[0-9]*.rpm \
     /tmp/kernel-rpms/kernel-core-*.rpm \
+    /tmp/kernel-rpms/kernel-devel-[0-9]*.rpm \
+    /tmp/kernel-rpms/kernel-devel-matched-*.rpm \
     /tmp/kernel-rpms/kernel-modules-*.rpm
 
 # Prevent later updates from replacing the kernel without matching kmods.

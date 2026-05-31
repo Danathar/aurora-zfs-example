@@ -13,7 +13,7 @@ FROM ghcr.io/ublue-os/akmods:coreos-stable-"${FEDORA_VERSION}"-x86_64 AS akmods
 # If this breaks because there is a new major kernel release and zfs isn't
 # available yet for that kernel then congratulations you found out why Aurora
 # dropped it. to pin replace with something like
-# akmods:zfs:coreos-stable-43-6.18.13-200.fc43.x86_64
+# ghcr.io/ublue-os/akmods-zfs:coreos-stable-43-6.18.13-200.fc43.x86_64
 # https://github.com/ublue-os/akmods/pkgs/container/akmods-zfs
 # if you have to pin keep this in sync with the above if you use it
 FROM ghcr.io/ublue-os/akmods-zfs:coreos-stable-"${FEDORA_VERSION}"-x86_64 AS akmods-zfs

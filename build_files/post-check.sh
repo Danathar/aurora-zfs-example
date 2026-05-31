@@ -156,16 +156,25 @@ check_kernel_tree() {
     KERNEL=$(basename "${kernel_dirs[0]}")
     log "selected kernel: ${KERNEL}"
 
-    require_rpm "kernel-core"
-    require_rpm "kernel-modules"
-    require_rpm "kernel-modules-core"
-    require_rpm "kernel-modules-extra"
+    local kernel_pkg
+    local kernel_packages=(
+        kernel
+        kernel-core
+        kernel-devel
+        kernel-devel-matched
+        kernel-modules
+        kernel-modules-core
+        kernel-modules-extra
+    )
 
-    # Make sure the kernel-core RPM agrees with /usr/lib/modules. If this mismatches,
-    # the image can boot one kernel while carrying modules for another.
-    if [[ "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)" != "${KERNEL}" ]]; then
-        fail "kernel-core RPM does not match /usr/lib/modules kernel ${KERNEL}"
-    fi
+    for kernel_pkg in "${kernel_packages[@]}"; do
+        require_rpm "${kernel_pkg}"
+        # Make sure each kernel RPM agrees with /usr/lib/modules. If this mismatches,
+        # the image can boot one kernel while carrying files or headers for another.
+        if [[ "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' "${kernel_pkg}")" != "${KERNEL}" ]]; then
+            fail "${kernel_pkg} RPM does not match /usr/lib/modules kernel ${KERNEL}"
+        fi
+    done
 }
 
 check_zfs_packages() {
