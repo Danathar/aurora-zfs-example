@@ -4,6 +4,15 @@
 
 [![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
 
+> [!NOTE]
+> `main` is now the maintained AMD/non-NVIDIA branch. The previous NVIDIA Open
+> version was moved to the
+> [`nvidia-legacy`](https://github.com/Danathar/aurora-zfs-simple/tree/nvidia-legacy)
+> branch and tagged
+> `nvidia-last-known-good-2026-05-31`. That NVIDIA branch is unmaintained; it
+> worked the last time it was used, but it may stop building or working as
+> upstream Aurora, kernel, ZFS, or NVIDIA inputs change.
+
 This is a small, GitHub-built Aurora DX developer image that adds ZFS back using
 upstream Universal Blue akmods artifacts.
 
@@ -52,6 +61,9 @@ Reboot after switching back.
 - base image: `ghcr.io/ublue-os/aurora-dx:stable`
 - kernel RPMs: `ghcr.io/ublue-os/akmods`
 - ZFS RPMs: `ghcr.io/ublue-os/akmods-zfs`
+
+This branch intentionally does not include the NVIDIA Open Aurora base image or
+NVIDIA akmods.
 
 ## Important Design Detail
 
