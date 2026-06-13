@@ -61,6 +61,7 @@ Reboot after switching back.
 - base image: `ghcr.io/ublue-os/aurora-dx:stable`
 - kernel RPMs: `ghcr.io/ublue-os/akmods`
 - ZFS RPMs: `ghcr.io/ublue-os/akmods-zfs`
+- content-based image layering: [`coreos/chunkah`](https://github.com/coreos/chunkah)
 
 This branch intentionally does not include the NVIDIA Open Aurora base image or
 NVIDIA akmods.
@@ -125,6 +126,7 @@ build_files/kernel-akmods.sh          kernel replacement and common akmods insta
 build_files/post-check.sh             final image validation for kernel and ZFS
 build_files/zfs.sh                    ZFS RPM installation and final initramfs generation
 .github/workflows/build.yml           build and publish the container image
+.github/renovate.json5                dependency and pinned Chunkah release updates
 docs/manual-input-check.md            Fedora release input-check notes
 ```
 
@@ -139,8 +141,19 @@ gh workflow run build.yml
 ```
 
 The workflow also runs on the default branch according to `.github/workflows/build.yml`.
-It builds and publishes the container image, then signs it on default-branch
-non-PR runs.
+It builds the complete image, post-processes it with Chunkah, publishes it, and
+then signs it on default-branch non-PR runs.
+
+Chunkah runs after the kernel and ZFS changes have been applied. It rebuilds the
+final root filesystem into content-based layers, including both the inherited
+Aurora content and this image's replacement kernel and ZFS files. This improves
+layer reuse and update resumability; it does not change the files installed in
+the image.
+
+The workflow uses an explicit stable Chunkah version and immutable image digest,
+for example `v0.6.0@sha256:...`, instead of the floating `latest` tag. Renovate's
+custom manager in `.github/renovate.json5` tracks newer stable `vX.Y.Z` releases
+and updates the version and digest together.
 
 Scheduled builds run weekly on Sunday morning at 05:00 UTC, which is about
 1:00 AM Eastern during daylight time. This keeps the image refreshed before a
@@ -216,3 +229,4 @@ cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-simple:latest
 - Aurora discussion: https://github.com/ublue-os/aurora/issues/1765
 - Universal Blue akmods repo: https://github.com/ublue-os/akmods
 - Universal Blue akmods issues: https://github.com/ublue-os/akmods/issues
+- Chunkah repo: https://github.com/coreos/chunkah
