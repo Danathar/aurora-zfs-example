@@ -6,6 +6,20 @@
 
   "rebaseWhen": "never",
 
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track stable Chunkah container releases",
+      "managerFilePatterns": ["/^\\.github\/workflows\/.*\\.ya?ml$/"],
+      "matchStrings": [
+        "CHUNKAH_IMAGE:\\s+quay\\.io/coreos/chunkah:(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]+)",
+      ],
+      "depNameTemplate": "quay.io/coreos/chunkah",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver-coerced",
+    },
+  ],
+
   "packageRules": [
     {
       "automerge": true,
