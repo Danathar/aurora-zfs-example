@@ -155,9 +155,6 @@ jobs:
           archive=/tmp/chunkah-oci.tar
           export CHUNKAH_CONFIG_STR
           CHUNKAH_CONFIG_STR="$(podman inspect "${source_image}")"
-          # The built image carries every metadata tag; capture its ID so it
-          # can be removed with all of its names in one shot after chunking.
-          source_id="$(podman image inspect --format '{{.Id}}' "${source_image}")"
 
           echo "==> Disk usage before rechunk" && df -h / /mnt
 
@@ -173,15 +170,19 @@ jobs:
               --label ostree.final-diffid- \
               --tag "${chunked_image}" > "${archive}"
 
-          # The archive is written; the source image and the dangling build
-          # stages are no longer needed. Free their layers before loading.
-          podman rmi -f "${source_id}"
-          podman image prune -f
-          echo "==> Disk usage after freeing source image" && df -h / /mnt
+          # The archive is self-contained, so nothing left in container
+          # storage is needed anymore: not the source image, not the Aurora
+          # base or akmods images (tagged, so a plain prune would keep
+          # them), not the Chunkah image. Remove them all so the load starts
+          # against an empty store.
+          podman image prune -af
+          echo "==> Disk usage after pruning container storage" && df -h / /mnt
 
           # podman unpacks oci archives into TMPDIR before applying them;
           # keep that on /mnt next to container storage instead of /var/tmp.
-          mkdir -p /mnt/tmp
+          # /mnt is root-owned on the hosted runners, hence sudo + chown.
+          sudo mkdir -p /mnt/tmp
+          sudo chown "$(id -u):$(id -g)" /mnt/tmp
           TMPDIR=/mnt/tmp podman load -i "${archive}"
           rm -f "${archive}"
           echo "==> Disk usage after load" && df -h / /mnt
