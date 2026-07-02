@@ -210,6 +210,18 @@ check_zfs_modules() {
     depmod -a "${KERNEL}"
     modinfo -k "${KERNEL}" spl >/dev/null 2>&1 || fail "modinfo cannot find spl for ${KERNEL}"
     modinfo -k "${KERNEL}" zfs >/dev/null 2>&1 || fail "modinfo cannot find zfs for ${KERNEL}"
+
+    # Verify each module was built for this exact kernel. modinfo finding the
+    # file does not prove vermagic matches; a mismatched module would pass the
+    # checks above and then fail to load at boot. The first space-delimited
+    # vermagic field is the kernel release string.
+    local module vermagic
+    for module in spl zfs; do
+        vermagic=$(modinfo -k "${KERNEL}" -F vermagic "${module}")
+        if [[ "${vermagic%% *}" != "${KERNEL}" ]]; then
+            fail "${module} vermagic '${vermagic}' does not match kernel ${KERNEL}"
+        fi
+    done
 }
 
 check_zfs_userspace() {
@@ -245,6 +257,7 @@ check_initramfs() {
     require_file "/usr/lib/modules/${KERNEL}/initramfs.img"
     INITRAMFS_LIST=$(lsinitrd "/usr/lib/modules/${KERNEL}/initramfs.img")
     grep -q 'zfs\.ko' <<<"${INITRAMFS_LIST}" || fail "initramfs does not contain zfs.ko"
+    grep -q 'spl\.ko' <<<"${INITRAMFS_LIST}" || fail "initramfs does not contain spl.ko"
 }
 
 check_rpm_payloads() {
