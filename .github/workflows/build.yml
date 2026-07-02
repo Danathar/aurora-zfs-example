@@ -53,10 +53,18 @@ jobs:
 
       # Ubuntu 24.04's Podman does not preserve Chunkah's layer annotations
       # when pushing. Use the same newer toolchain as Aurora until the hosted
-      # runner includes a sufficiently new Podman release.
+      # runner includes a sufficiently new Podman release. The step skips
+      # itself once the runner's podman major version is >= 5, so it retires
+      # automatically when GitHub updates the hosted image.
       - name: Update Podman
         run: |
           set -eux
+          need_major=5
+          have_major=$(podman --version | grep -oE '[0-9]+' | head -n 1)
+          if [ "${have_major}" -ge "${need_major}" ]; then
+            echo "Runner podman is already >= ${need_major}; skipping cross-release install"
+            exit 0
+          fi
           echo "deb http://azure.archive.ubuntu.com/ubuntu resolute universe main" | sudo tee /etc/apt/sources.list.d/resolute.list
           sudo apt-get update
           sudo apt-get install -y --allow-downgrades \
