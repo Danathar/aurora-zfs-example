@@ -183,7 +183,9 @@ jobs:
         with:
           registry: ${{ env.IMAGE_REGISTRY }}
           image: ${{ env.IMAGE_NAME }}
-          tags: ${{ steps.metadata.outputs.tags }}
+          # Push exactly one tag. The remaining tags are copied from the
+          # pushed digest in the next step so every tag is byte-identical.
+          tags: latest
           username: ${{ env.REGISTRY_USER }}
           password: ${{ env.REGISTRY_PASSWORD }}
 
