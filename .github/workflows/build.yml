@@ -136,6 +136,14 @@ jobs:
 
       # Post-process the completed image so the ZFS and replacement-kernel
       # content is chunked along with the inherited Aurora filesystem.
+      #
+      # Chunkah's output used to be piped straight into `podman load`, which
+      # forced the source image and the re-layered copy to coexist in one
+      # container storage (~2x the unpacked image) and exhausted the runner
+      # disk intermittently. Instead, buffer the compressed archive to a file
+      # on / , delete the source image to free its layers, and only then load
+      # the archive with its unpack temp dir pointed at /mnt. Neither disk
+      # ever has to hold two unpacked copies of the image at once.
       - name: Rechunk Image with Chunkah
         env:
           CHUNKAH_IMAGE: quay.io/coreos/chunkah:v0.6.0@sha256:ff8b8b466a942ec6000445d4001fc661e2fc5a952ad9ee29b4de9ab09d1d1708
@@ -144,8 +152,14 @@ jobs:
 
           source_image="localhost/${IMAGE_NAME}:${DEFAULT_TAG}"
           chunked_image="localhost/${IMAGE_NAME}:chunkah"
+          archive=/tmp/chunkah-oci.tar
           export CHUNKAH_CONFIG_STR
           CHUNKAH_CONFIG_STR="$(podman inspect "${source_image}")"
+          # The built image carries every metadata tag; capture its ID so it
+          # can be removed with all of its names in one shot after chunking.
+          source_id="$(podman image inspect --format '{{.Id}}' "${source_image}")"
+
+          echo "==> Disk usage before rechunk" && df -h / /mnt
 
           podman run --rm \
             --mount=type=image,src="${source_image}",target=/chunkah \
@@ -157,7 +171,20 @@ jobs:
               --prune /sysroot/ \
               --label ostree.commit- \
               --label ostree.final-diffid- \
-              --tag "${chunked_image}" | podman load
+              --tag "${chunked_image}" > "${archive}"
+
+          # The archive is written; the source image and the dangling build
+          # stages are no longer needed. Free their layers before loading.
+          podman rmi -f "${source_id}"
+          podman image prune -f
+          echo "==> Disk usage after freeing source image" && df -h / /mnt
+
+          # podman unpacks oci archives into TMPDIR before applying them;
+          # keep that on /mnt next to container storage instead of /var/tmp.
+          mkdir -p /mnt/tmp
+          TMPDIR=/mnt/tmp podman load -i "${archive}"
+          rm -f "${archive}"
+          echo "==> Disk usage after load" && df -h / /mnt
 
           for tag in ${{ steps.metadata.outputs.tags }}; do
             podman tag "${chunked_image}" "${IMAGE_NAME}:${tag}"
