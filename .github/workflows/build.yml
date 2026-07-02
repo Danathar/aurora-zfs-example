@@ -170,6 +170,29 @@ jobs:
           username: ${{ env.REGISTRY_USER }}
           password: ${{ env.REGISTRY_PASSWORD }}
 
+      # All tags in this job point at one manifest pushed from one local
+      # image. Enforce that as an invariant instead of trusting it: if any
+      # published tag resolves to a different digest than the one about to
+      # be signed, fail before signing rather than publish a half-signed
+      # tag set.
+      - name: Verify pushed tags share one digest
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          set -euo pipefail
+          expected="${{ steps.push.outputs.digest }}"
+          if [ -z "${expected}" ]; then
+            echo "push step did not expose a digest" >&2
+            exit 1
+          fi
+          for tag in ${{ steps.metadata.outputs.tags }}; do
+            actual=$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}")
+            if [ "${actual}" != "${expected}" ]; then
+              echo "Tag ${tag} resolves to ${actual}, expected ${expected}" >&2
+              exit 1
+            fi
+            echo "Tag ${tag} -> ${actual} OK"
+          done
+
       # This section is optional and only needs to be enabled if you plan on distributing
       # your project for others to consume. You will need to create a public and private key
       # using Cosign and save the private key as a repository secret in Github for this workflow

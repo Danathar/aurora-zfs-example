@@ -36,5 +36,10 @@
       "enabled": false,
       "matchManagers": ["github-actions"],
     },
+    {
+      "description": "Containerfile images are hand-managed via ARGs; the weekly scheduled build tracks :stable by design. Do not update or pin them.",
+      "enabled": false,
+      "matchManagers": ["dockerfile"],
+    },
   ]
 }
