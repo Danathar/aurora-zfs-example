@@ -74,6 +74,23 @@ jobs:
             skopeo/resolute
           podman --version
 
+      # GitHub-hosted runners keep most of their free space on /mnt (~66G),
+      # while / has far less headroom. Building the image and then re-layering
+      # it with Chunkah keeps two copies of the root filesystem in podman's
+      # storage at once, which can exhaust /. Relocate podman's rootless
+      # storage onto /mnt so the rechunk has room. The image-copy temp dir is
+      # deliberately left on / (freed by relocating storage) so the two large
+      # consumers land on separate disks instead of competing for one.
+      - name: Move container storage to the large runner disk
+        run: |
+          set -eux
+          sudo mkdir -p /mnt/containers
+          sudo chown "$(id -u):$(id -g)" /mnt/containers
+          mkdir -p "${HOME}/.local/share"
+          rm -rf "${HOME}/.local/share/containers"
+          ln -s /mnt/containers "${HOME}/.local/share/containers"
+          df -h / /mnt
+
       - name: Get current date
         id: date
         run: |
