@@ -1,8 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices",
+    "config:best-practices"
   ],
+
+  "forkProcessing": "enabled",
 
   "rebaseWhen": "never",
 
@@ -10,14 +12,16 @@
     {
       "customType": "regex",
       "description": "Track stable Chunkah container releases",
-      "managerFilePatterns": ["/^\\.github\/workflows\/.*\\.ya?ml$/"],
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.*\\.ya?ml$/"
+      ],
       "matchStrings": [
-        "CHUNKAH_IMAGE:\\s+quay\\.io/coreos/chunkah:(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]+)",
+        "CHUNKAH_IMAGE:\\s+\"?quay\\.io/coreos/chunkah:(?<currentValue>v\\d+\\.\\d+\\.\\d+)\"?"
       ],
       "depNameTemplate": "quay.io/coreos/chunkah",
       "datasourceTemplate": "docker",
-      "versioningTemplate": "semver-coerced",
-    },
+      "versioningTemplate": "semver-coerced"
+    }
   ],
 
   "packageRules": [
@@ -29,17 +33,22 @@
       "enabled": false,
       "matchUpdateTypes": ["digest", "pinDigest", "pin"],
       "matchDepTypes": ["container"],
-      "matchFileNames": [".github/workflows/**.yaml", ".github/workflows/**.yml"],
+      "matchFileNames": [".github/workflows/**.yaml", ".github/workflows/**.yml"]
+    },
+    {
+      "enabled": false,
+      "matchUpdateTypes": ["digest", "pinDigest", "pin"],
+      "matchPackageNames": ["quay.io/coreos/chunkah"]
     },
     {
       "description": "Dependabot owns GitHub Actions version updates; disable Renovate's github-actions manager to avoid duplicate PRs. Renovate still owns the Chunkah custom manager above.",
       "enabled": false,
-      "matchManagers": ["github-actions"],
+      "matchManagers": ["github-actions"]
     },
     {
       "description": "Containerfile images are hand-managed via ARGs; the weekly scheduled build tracks :stable by design. Do not update or pin them.",
       "enabled": false,
-      "matchManagers": ["dockerfile"],
-    },
+      "matchManagers": ["dockerfile"]
+    }
   ]
 }
