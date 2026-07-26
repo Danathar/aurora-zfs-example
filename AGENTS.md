@@ -245,10 +245,29 @@ keeps Aurora userspace updates flowing. They must be pinned **together** — the
 must be unpinned again later, or the image is frozen on an unpatched kernel;
 leave a tracking note when doing this.
 
-**Move to the `coreos-testing` stream.** Gets a current kernel immediately, but
-its ZFS is built with `--enable-linux-experimental`, i.e. against a kernel
-OpenZFS has not declared support for. This is a root filesystem. Treat as a
-last resort.
+**Take the ZFS kmod from the `coreos-testing` stream.** Before dismissing this
+as reckless, check *why* `Linux-Maximum` is low. There are two very different
+cases, and they call for opposite decisions:
+
+- *The compat code does not exist yet.* Genuinely unsupported. Avoid.
+- *The compat code landed, but the cap was not raised because the kernel was
+  not final at release time.* Then the cap is *metadata*, and
+  `--enable-linux-experimental` is the workaround OpenZFS maintainers
+  themselves recommend. Read the relevant openzfs/zfs issue before judging.
+
+The 2026-07 event was the second kind (see incident log). Note the two streams
+publish builds for the **same** kernel, so the pin can be mixed — the kernel
+still comes from `coreos-stable`, only the ZFS kmod comes from
+`coreos-testing`:
+
+```Dockerfile
+FROM ghcr.io/ublue-os/akmods:coreos-stable-44-7.1.3-200.fc44.x86_64 AS akmods
+FROM ghcr.io/ublue-os/akmods-zfs:coreos-testing-44-7.1.3-200.fc44.x86_64 AS akmods-zfs
+```
+
+Verify the `ostree.linux` labels are identical before doing this — that is the
+whole safety property. This keeps the stable kernel stream and confines the
+"experimental" part to the configure flag.
 
 Do not "fix" this by loosening the glob in `zfs.sh` or making the kmod install
 non-fatal. A `kmod-zfs` built for a different kernel will not load, and the
@@ -281,3 +300,30 @@ Keep this appended to; the recurrence pattern is the useful part.
   backported to `zfs-2.4-release`. Since ublue pins `minor_version: "2.4"`, a
   2.4.4 carrying the backport would resolve this with no change to this repo or
   to ublue.
+- **The cap was metadata-only.** In
+  [openzfs/zfs#18760](https://github.com/openzfs/zfs/issues/18760), maintainer
+  `behlendorf` stated on 2026-07-08 that the needed 7.1 compatibility patches
+  shipped in **2.4.2**, and were simply not declared supported because the 7.1
+  kernel was not final at release time; that building with
+  `--enable-linux-experimental` is safe for 7.1; and that 7.1 would be on by
+  default in the next release. So the `coreos-testing` kmod was not a gamble
+  here — it was the upstream-recommended workaround.
+
+### Upstream issue map (where to look first)
+
+- **openzfs/zfs** — the root cause always lands here first. #18760 tracked the
+  7.1 request; #18767 covered the resulting dnf downgrade weirdness.
+- **ublue-os/akmods** — carries the *policy*. PR #554 (merged 2026-07-20) moved
+  ZFS release policy into `images.yaml` and added the per-flavor
+  `linux_experimental` switch, enabled for `coreos-testing` only. Issue #523 is
+  a *different*, older ZFS CI problem (aarch64 NEON / GCC 16) — do not confuse
+  the two.
+- **ublue-os/ucore** — the other big ZFS consumer, but it rides Fedora CoreOS,
+  whose stable stream lags Fedora proper, so it usually hits these walls much
+  later than this repo does. Green builds there are not evidence this repo is
+  fine.
+- **ublue-os/aurora** — will not fix ZFS breakage. Aurora is *removing* ZFS
+  (#1765: dropped starting with Fedora 45 images, Fall 2026; #2210 and PR #2613
+  add a deprecation notifier). Expect no upstream help from Aurora, and expect
+  this repo to be the sole carrier of ZFS after Fedora 45.
+- **ublue-os/bluefin** — does not ship ZFS. Not a useful signal.
