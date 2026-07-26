@@ -98,8 +98,8 @@ it is the same reason Aurora dropped ZFS. It is not a regression in this repo.
 
 ### 60-second diagnosis
 
-Confirm the skew first. If the three lines below do not all show the same
-kernel, you already have your answer and can skip the logs:
+Confirm the skew first. **Only the two akmods labels decide this.** If they
+differ, you already have your answer and can skip the logs:
 
 ```bash
 FEDORA_VERSION=44
@@ -107,11 +107,19 @@ for img in akmods akmods-zfs; do
   printf '%-12s %s\n' "$img" "$(skopeo inspect --format '{{ index .Labels "ostree.linux" }}' \
     "docker://ghcr.io/ublue-os/${img}:coreos-stable-${FEDORA_VERSION}-x86_64")"
 done
+# context only — not part of the skew test
 printf '%-12s %s\n' "aurora-dx" \
   "$(skopeo inspect --format '{{ index .Labels "ostree.linux" }}' docker://ghcr.io/ublue-os/aurora-dx:stable)"
 ```
 
 The `ostree.linux` label is the authoritative kernel version for these images.
+
+Do **not** treat a differing `aurora-dx` kernel as skew. `kernel-akmods.sh`
+erases Aurora's kernel outright, and `zfs.sh` only requires `kmod-zfs` to match
+the replacement kernel from `akmods`. This image legitimately runs a kernel
+newer than Aurora stable whenever the akmods stream is ahead — that is the
+design, not a fault. The `aurora-dx` value is useful context for judging *how
+far* ahead the akmods stream has run, nothing more.
 
 Then confirm the failure matches:
 
@@ -222,9 +230,12 @@ the ceiling is raised only in the *next* minor (2.5), upstream ublue must first
 bump `minor_version` — a PR on their side, so a longer and less certain wait.
 Check step 3 to determine which case applies before committing to waiting.
 
-The cost of waiting is that the scheduled build fails daily and **no new image
-is published**, so the deployed system stops receiving Aurora and security
-updates until it clears. Fine for a short gap, bad for a long one.
+The cost of waiting is that **no new image is published**, so the deployed
+system stops receiving Aurora and security updates until it clears. The
+scheduled build runs weekly (`00 05 * * 0`), so the CI noise is one failed run
+per Sunday — but that same cadence is also the normal refresh rate, so each
+week spent waiting is one skipped image. Fine for a short gap, bad for a long
+one.
 
 **Pin both images to the last matching kernel.** In the `Containerfile`,
 replace *both* floating tags with the same kernel-pinned tag, e.g.
