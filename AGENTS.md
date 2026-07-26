@@ -8,6 +8,29 @@ Companion doc: [`docs/manual-input-check.md`](docs/manual-input-check.md) covers
 *pre-flight* checks before a Fedora major-release bump. This file covers
 *post-mortem* diagnosis of a build that already broke.
 
+## Pull request review
+
+After opening a PR here, check what `chatgpt-codex-connector[bot]` said before
+handing the PR back. It posts as a PR **review** with **inline review
+comments**, which `gh pr view <N> --comments` does not show:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<N>/comments \
+  --jq '.[] | "PATH: \(.path):\(.line // .original_line)\n\(.body)\n---"'
+gh api repos/{owner}/{repo}/pulls/<N>/reviews \
+  --jq '.[] | "\(.user.login) [\(.state)]: \(.body)"'
+```
+
+Findings carry a severity badge (`P1`, `P2`, …). Verify each claim against the
+code or docs before acting — it is often right, but not automatically right.
+Fix what is valid and push to the same branch; push back with evidence on what
+is not. Either way, report what it found and what you did.
+
+**Do not block on it.** Give it a couple of minutes, and if no review has
+appeared, proceed and say so. An empty `/issues/<N>/comments` is not evidence
+the bot stayed silent — check the two endpoints above. Never sit in a polling
+loop waiting for it.
+
 ## What this image is
 
 A thin derivative of Aurora DX that adds ZFS back. It does not compile ZFS. It
@@ -134,16 +157,31 @@ it is stale, because that determines which fix is appropriate.
    *** The maximum supported kernel version is <X.Y>.
    ```
 
-3. **Has OpenZFS raised the ceiling yet?**
+3. **Has OpenZFS raised the ceiling yet?** `master` raises `Linux-Maximum`
+   first, but what matters is the **release branch**, since that is what
+   upstream akmods builds against. Compare them:
 
    ```bash
-   gh api repos/openzfs/zfs/contents/META --jq '.content' | base64 -d | grep Linux-
-   gh api repos/openzfs/zfs/releases --jq '.[] | "\(.tag_name)\t\(.published_at)"' | head
+   for ref in master zfs-2.4-release; do
+     printf '%-18s ' "$ref"
+     gh api "repos/openzfs/zfs/contents/META?ref=$ref" --jq '.content' \
+       | base64 -d | grep -E "Version:|Linux-Maximum:" | tr '\n' ' '; echo
+   done
    ```
 
-   `master` usually raises `Linux-Maximum` well before it appears in a tagged
-   release. What matters is whether a **tagged** release has it, since that is
-   what upstream akmods builds against.
+   To estimate how long a backport will take, look at the cadence of past
+   compat bumps on the release branch:
+
+   ```bash
+   gh api repos/openzfs/zfs/commits -X GET -f path=META -f sha=zfs-2.4-release \
+     --jq '.[] | "\(.commit.author.date[0:10]) \(.commit.message | split("\n")[0])"' | head
+   ```
+
+   OpenZFS reliably backports `Linux N.M compat: META` to the active release
+   branches — historically same-day or within a week of master — and tags a
+   point release days to a couple of weeks later. A long gap between a master
+   compat bump and the backport usually just means no point release has been
+   cut yet.
 
 4. **What tags are actually available to pin to?**
 
@@ -175,10 +213,18 @@ Listed in ascending order of risk.
 **Wait.** Legitimate and usually correct. Upstream's stable ZFS job goes green
 on its own once OpenZFS tags a release whose `Linux-Maximum` covers Fedora's
 kernel; the floating tags then re-converge and this repo builds again with no
-change. The cost is that the scheduled build fails daily in the meantime and
-**no new image is published**, so the deployed system stops receiving Aurora
-and security updates until it clears. Acceptable for a short gap; check step 3
-above to estimate how short.
+change at all.
+
+Crucially, this is automatic only *within* the pinned minor series. Upstream's
+`images.yaml` pins ZFS to a `minor_version` (e.g. `"2.4"`), so a 2.4.x point
+release carrying the compat bump flows through with no action from anyone. If
+the ceiling is raised only in the *next* minor (2.5), upstream ublue must first
+bump `minor_version` — a PR on their side, so a longer and less certain wait.
+Check step 3 to determine which case applies before committing to waiting.
+
+The cost of waiting is that the scheduled build fails daily and **no new image
+is published**, so the deployed system stops receiving Aurora and security
+updates until it clears. Fine for a short gap, bad for a long one.
 
 **Pin both images to the last matching kernel.** In the `Containerfile`,
 replace *both* floating tags with the same kernel-pinned tag, e.g.
@@ -219,3 +265,8 @@ Keep this appended to; the recurrence pattern is the useful part.
   `linux_experimental: true` for `coreos-testing` (ublue-os/akmods PR #554).
 - Viable pin at the time: `coreos-stable-44-7.0.12-201.fc44.x86_64`, present in
   both `akmods` and `akmods-zfs`.
+- Backport status as of 2026-07-26: `Linux 7.1 compat: META` (#18682) landed on
+  `master` 2026-06-17, five days *after* 2.4.3 was tagged, and had not yet been
+  backported to `zfs-2.4-release`. Since ublue pins `minor_version: "2.4"`, a
+  2.4.4 carrying the backport would resolve this with no change to this repo or
+  to ublue.
