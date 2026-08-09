@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "label": "openzfs/kernel",
+  "message": "blocked: kernel 7.1.4-200, ZFS kmod 7.0.12-201",
+  "color": "red"
+}
