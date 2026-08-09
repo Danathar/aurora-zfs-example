@@ -234,8 +234,17 @@ There is a third resolution path worth checking for before assuming the wait is
 gated on OpenZFS at all: ublue can **carry the upstream commits as patches** on
 the pinned release rather than wait for the tag. They did exactly this in
 akmods#566 (see incident log). So when the OpenZFS release branch looks stuck,
-check `gh pr list --repo ublue-os/akmods --search zfs` before concluding that
-nothing is moving.
+check for a ublue-side patch PR before concluding that nothing is moving:
+
+```bash
+gh pr list --repo ublue-os/akmods --search zfs --state all --limit 20
+```
+
+`--state all` is load-bearing. `gh pr list` defaults to `--state open`, and the
+window that matters most is the one *after* a patch PR merges but *before* the
+floating tag rebuilds — exactly when the default would show nothing and lead you
+to pin unnecessarily. The default also hides #554 and #566, the two PRs this
+file tells you to look for.
 
 Waiting is also not the same as waiting for the cron. The workflow has
 `workflow_dispatch`, so once the `akmods-zfs` label re-converges you can build
