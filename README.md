@@ -117,9 +117,16 @@ FROM ghcr.io/ublue-os/akmods-zfs:coreos-stable-44-6.19.14-101.fc44.x86_64 AS akm
 
 Pin both inputs together. Do not pin only one of them.
 
+When a build has already failed this way, [`AGENTS.md`](AGENTS.md) has the
+step-by-step diagnosis: how to confirm the skew, how to trace it back to the
+upstream `ublue-os/akmods` job and the OpenZFS kernel-version gate, and how to
+pick between waiting, pinning, and switching streams.
+
 ## Repository Layout
 
 ```text
+AGENTS.md                             agent notes: build-failure diagnosis and upstream tracing
+CLAUDE.md                             pointer to AGENTS.md
 Containerfile                         image build definition
 build_files/build.sh                  package and service customization inside the image
 build_files/kernel-akmods.sh          kernel replacement and common akmods installation
