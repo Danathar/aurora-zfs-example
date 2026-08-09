@@ -14,10 +14,12 @@ that means for you:
 - **last good build** — when the published `:latest` image was actually built.
   This image is still installable and still boots; a red build just means it has
   not been refreshed since that date.
-- **OpenZFS/kernel** — whether the two upstream akmods images agree on a kernel
-  version. `blocked` means upstream has not published a `kmod-zfs` for the
-  kernel the build wants, which is the near-universal cause of a red build here.
-  Click through for what that is and what to do about it.
+- **OpenZFS/kernel** — whether the two akmods images *this `Containerfile`
+  pulls* agree on a kernel version. `blocked` means there is no `kmod-zfs`
+  published for the kernel the build wants, which is the near-universal cause of
+  a red build here. Because it reads the `FROM` lines rather than a fixed tag,
+  it also tracks pinned inputs correctly. Click through for what that means and
+  what to do about it.
 
 > [!NOTE]
 > `main` is now the maintained AMD/non-NVIDIA branch. The previous NVIDIA Open

@@ -25,8 +25,6 @@ set -euo pipefail
 
 OUT_DIR="${OUT_DIR:-artifacts}"
 CONTAINERFILE="${CONTAINERFILE:-Containerfile}"
-ARCH="${ARCH:-x86_64}"
-AKMODS_STREAM="${AKMODS_STREAM:-coreos-stable}"
 
 mkdir -p "$OUT_DIR"
 
@@ -75,15 +73,42 @@ ostree_linux_of() {
   printf '%s' "$1" | jq -r '.Labels["ostree.linux"] // empty' 2>/dev/null || true
 }
 
-akmods_tag="${AKMODS_STREAM}-${FEDORA_VERSION}-${ARCH}"
-kernel_akmods="$(ostree_linux_of "$(inspect_json "ghcr.io/ublue-os/akmods:${akmods_tag}")")"
-kernel_zfs="$(ostree_linux_of "$(inspect_json "ghcr.io/ublue-os/akmods-zfs:${akmods_tag}")")"
+# Read the image reference for a build stage out of the Containerfile rather
+# than reconstructing it from a stream name. The documented outage workarounds
+# edit these FROM lines directly -- pinning both inputs to one kernel tag, or
+# mixing coreos-stable akmods with a coreos-testing ZFS kmod -- and a badge that
+# kept inspecting the floating tags would report on images the build no longer
+# uses. It would show "blocked" after a pin had already fixed the build, and,
+# worse, show "in sync" when only one input had been pinned, which is precisely
+# the mistake AGENTS.md warns against.
+from_ref() {
+  local stage="$1" line ref
+  line="$(grep -E "^FROM[[:space:]]+[^[:space:]]+[[:space:]]+AS[[:space:]]+${stage}[[:space:]]*$" "$CONTAINERFILE" | head -1)"
+  [ -n "$line" ] || return 0
+  ref="$(printf '%s' "$line" | awk '{print $2}' | tr -d "\"'")"
+  # The Containerfile interpolates the same ARG this script already resolved.
+  ref="${ref//\$\{FEDORA_VERSION\}/${FEDORA_VERSION}}"
+  ref="${ref//\$FEDORA_VERSION/${FEDORA_VERSION}}"
+  printf '%s' "$ref"
+}
 
-echo "akmods:     ${kernel_akmods:-<unreadable>}"
-echo "akmods-zfs: ${kernel_zfs:-<unreadable>}"
+akmods_ref="$(from_ref akmods)"
+akmods_zfs_ref="$(from_ref akmods-zfs)"
+
+echo "akmods ref:     ${akmods_ref:-<not found>}"
+echo "akmods-zfs ref: ${akmods_zfs_ref:-<not found>}"
+
+kernel_akmods=""
+kernel_zfs=""
+if [ -n "$akmods_ref" ] && [ -n "$akmods_zfs_ref" ]; then
+  kernel_akmods="$(ostree_linux_of "$(inspect_json "$akmods_ref")")"
+  kernel_zfs="$(ostree_linux_of "$(inspect_json "$akmods_zfs_ref")")"
+  echo "akmods:     ${kernel_akmods:-<unreadable>}"
+  echo "akmods-zfs: ${kernel_zfs:-<unreadable>}"
+fi
 
 if [ -z "$kernel_akmods" ] || [ -z "$kernel_zfs" ]; then
-  echo "Could not read both akmods labels; leaving the openzfs/kernel badge as-is."
+  echo "Could not determine both akmods kernels; leaving the openzfs/kernel badge as-is."
   set_output akmods_updated false
 elif [ "$kernel_akmods" = "$kernel_zfs" ]; then
   write_badge "${OUT_DIR}/akmods-badge.json" \
