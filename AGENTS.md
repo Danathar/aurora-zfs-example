@@ -230,6 +230,26 @@ the ceiling is raised only in the *next* minor (2.5), upstream ublue must first
 bump `minor_version` — a PR on their side, so a longer and less certain wait.
 Check step 3 to determine which case applies before committing to waiting.
 
+There is a third resolution path worth checking for before assuming the wait is
+gated on OpenZFS at all: ublue can **carry the upstream commits as patches** on
+the pinned release rather than wait for the tag. They did exactly this in
+akmods#566 (see incident log). So when the OpenZFS release branch looks stuck,
+check for a ublue-side patch PR before concluding that nothing is moving:
+
+```bash
+gh pr list --repo ublue-os/akmods --search zfs --state all --limit 20
+```
+
+`--state all` is load-bearing. `gh pr list` defaults to `--state open`, and the
+window that matters most is the one *after* a patch PR merges but *before* the
+floating tag rebuilds — exactly when the default would show nothing and lead you
+to pin unnecessarily. The default also hides #554 and #566, the two PRs this
+file tells you to look for.
+
+Waiting is also not the same as waiting for the cron. The workflow has
+`workflow_dispatch`, so once the `akmods-zfs` label re-converges you can build
+on demand instead of losing up to a week to the Sunday schedule.
+
 The cost of waiting is that **no new image is published**, so the deployed
 system stops receiving Aurora and security updates until it clears. The
 scheduled build runs weekly (`00 05 * * 0`), so the CI noise is one failed run
@@ -277,7 +297,7 @@ failure would move from the build to the boot.
 
 Keep this appended to; the recurrence pattern is the useful part.
 
-### 2026-07-22 → present: Fedora kernel 7.1 vs OpenZFS 2.4.3
+### 2026-07-22: Fedora kernel 7.1 vs OpenZFS 2.4.3
 
 - Last green scheduled build 2026-07-19. First failure 2026-07-22 (PR run),
   then every scheduled run.
@@ -309,15 +329,62 @@ Keep this appended to; the recurrence pattern is the useful part.
   default in the next release. So the `coreos-testing` kmod was not a gamble
   here — it was the upstream-recommended workaround.
 
+### 2026-08-09: kernel moves to 7.1.4; ublue patches 2.4.3 directly
+
+Same skew, one kernel bump further along, but the resolution path changed.
+
+- Scheduled run [31296445197](https://github.com/Danathar/aurora-zfs-simple/actions/runs/31296445197)
+  failed with `KERNEL=7.1.4-200.fc44.x86_64` and the usual
+  `Failed to access RPM ".../kmod-zfs-7.1.4-200.fc44.x86_64*.rpm"`.
+- Labels: `akmods:coreos-stable-44-x86_64` had advanced 7.1.3 → **7.1.4-200**,
+  while `akmods-zfs:coreos-stable-44-x86_64` was **still 7.0.12-201**, frozen
+  since July. `aurora-dx:stable` was also still 7.0.12-201.
+- Upstream `Build COREOS-STABLE akmods` still failing daily, same gate:
+  `*** The maximum supported kernel version is 7.0.` (both 43 and 44, both
+  arches).
+- OpenZFS had **not** moved in seven weeks: `zfs-2.4-release` still 2.4.3 with
+  `Linux-Maximum: 7.0`, newest tagged release still `zfs-2.4.3` (2026-06-12).
+  The "just wait for 2.4.4" expectation from the July entry did not pan out.
+- **The fix came from ublue instead.**
+  [ublue-os/akmods#566](https://github.com/ublue-os/akmods/pull/566)
+  (`bsherman`, opened 2026-08-09) stops waiting for 2.4.4 and applies the two
+  upstream commits as patches on 2.4.3: `a35e8d8` (openzfs/zfs#18682, the
+  one-line `Linux-Maximum` 7.0 → 7.1) and `223b8bc` (openzfs/zfs#18715, a real
+  bounds check replacing a debug-only `ASSERT3U` in `zfs_fillpage()` /
+  `zfs_getpage()`). The patches are gated to 2.4.3 and turn themselves off when
+  2.4.4 arrives. It also drops `linux_experimental` for `coreos-testing`, since
+  the META bump makes the flag unnecessary.
+- **Decision: wait, no `Containerfile` change.** #566 was maintainer-authored,
+  green across every flavor and arch, and blocking `ucore:stable` too, so the
+  expected wait was days. Plan was to watch the `akmods-zfs` stable label and
+  `workflow_dispatch` as soon as it read 7.1.x, falling back to the mixed pin if
+  the 2026-08-16 scheduled run also failed.
+- The mixed pin was verified available at the time and deliberately not taken:
+  `akmods:coreos-stable-44-7.1.4-200.fc44.x86_64` and
+  `akmods-zfs:coreos-testing-44-7.1.4-200.fc44.x86_64` both reported
+  `ostree.linux = 7.1.4-200.fc44.x86_64`. Two reasons to prefer waiting over
+  pinning when the wait is short: that `coreos-testing` kmod predates #566, so
+  it was built `--enable-linux-experimental` (dmesg spam that masks real
+  errors), and it lacks the #18715 mmap fix. Pinning would have bought a newer
+  kernel while keeping a memory-corruption bug that waiting removes.
+
+**Generalizable lesson:** a stalled OpenZFS release branch is no longer
+sufficient evidence that the wait is open-ended. Check for a ublue-side patch PR
+before reaching for a pin.
+
 ### Upstream issue map (where to look first)
 
 - **openzfs/zfs** — the root cause always lands here first. #18760 tracked the
-  7.1 request; #18767 covered the resulting dnf downgrade weirdness.
-- **ublue-os/akmods** — carries the *policy*. PR #554 (merged 2026-07-20) moved
-  ZFS release policy into `images.yaml` and added the per-flavor
-  `linux_experimental` switch, enabled for `coreos-testing` only. Issue #523 is
-  a *different*, older ZFS CI problem (aarch64 NEON / GCC 16) — do not confuse
-  the two.
+  7.1 request; #18767 covered the resulting dnf downgrade weirdness. #18682 is
+  the `Linux-Maximum` 7.0 → 7.1 META bump and #18715 the `zfs_fillpage()` /
+  `zfs_getpage()` mmap bounds check — the two commits akmods#566 backports.
+- **ublue-os/akmods** — carries the *policy*, and sometimes the *fix*. PR #554
+  (merged 2026-07-20) moved ZFS release policy into `images.yaml` and added the
+  per-flavor `linux_experimental` switch, enabled for `coreos-testing` only. PR
+  #566 (opened 2026-08-09) went further and patched 2.4.3 directly rather than
+  waiting for an OpenZFS tag, which is the precedent to look for when the
+  release branch stalls. Issue #523 is a *different*, older ZFS CI problem
+  (aarch64 NEON / GCC 16) — do not confuse the two.
 - **ublue-os/ucore** — the other big ZFS consumer, but it rides Fedora CoreOS,
   whose stable stream lags Fedora proper, so it usually hits these walls much
   later than this repo does. Green builds there are not evidence this repo is
