@@ -1,8 +1,23 @@
 # Aurora developer image with ZFS
 
+[![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
+
+[![last good build](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FDanathar%2Faurora-zfs-simple%2Fstatus%2Flast-good-build-badge.json)](https://github.com/Danathar/aurora-zfs-simple/pkgs/container/aurora-zfs-simple)
+
+[![OpenZFS/kernel status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FDanathar%2Faurora-zfs-simple%2Fstatus%2Fakmods-badge.json)](AGENTS.md#dominant-failure-mode-kernel--zfs-akmod-skew)
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
 
-[![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
+The **build** badge is red whenever the last run failed. The other two say what
+that means for you:
+
+- **last good build** — when the published `:latest` image was actually built.
+  This image is still installable and still boots; a red build just means it has
+  not been refreshed since that date.
+- **OpenZFS/kernel** — whether the two upstream akmods images agree on a kernel
+  version. `blocked` means upstream has not published a `kmod-zfs` for the
+  kernel the build wants, which is the near-universal cause of a red build here.
+  Click through for what that is and what to do about it.
 
 > [!NOTE]
 > `main` is now the maintained AMD/non-NVIDIA branch. The previous NVIDIA Open

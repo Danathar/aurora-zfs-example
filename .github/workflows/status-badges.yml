@@ -1,0 +1,95 @@
+---
+name: Status badges
+
+# Keeps two small JSON files on the `status` branch in sync with reality, so the
+# README badges can say whether a usable image exists and, when the build is
+# blocked, why. See ci/write-badges.sh for how each value is derived.
+#
+# This runs on its own schedule rather than only after a build, because the
+# openzfs/kernel badge is derived from upstream image labels, not from our build
+# outcome. Upstream skew appears (and clears) between our builds, and the badge
+# should track that rather than lag a week behind the Sunday schedule.
+
+on:
+  workflow_run:
+    workflows: ["Build container image"]
+    types:
+      - completed
+  schedule:
+    - cron: '30 06 * * *'  # daily, after the Sunday 05:00 UTC build has finished
+  workflow_dispatch:
+
+concurrency:
+  group: status-badges
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  badges:
+    name: Publish status badges
+    runs-on: ubuntu-24.04
+    # A PR build tells us nothing the scheduled run won't, and must not push to
+    # the status branch. On schedule/dispatch there is no workflow_run payload,
+    # so this is null and the condition passes.
+    if: github.event.workflow_run.event != 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Ensure skopeo is present
+        run: |
+          set -eux
+          command -v skopeo || { sudo apt-get update && sudo apt-get install -y skopeo; }
+          skopeo --version
+
+      - name: Write badge payloads
+        id: badges
+        env:
+          IMAGE_NAME: ${{ github.event.repository.name }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REGISTRY_ACTOR: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          OUT_DIR: artifacts
+        run: ./ci/write-badges.sh
+
+      # Published to a dedicated `status` branch rather than main, so these bot
+      # commits never touch the branch that produces images. shields.io's
+      # endpoint badge reads them straight off raw.githubusercontent.com.
+      #
+      # Only files written this run are copied over, so a run that could read
+      # one input but not the other leaves the other badge's last known-good
+      # content alone.
+      - name: Publish badges to status branch
+        if: steps.badges.outputs.akmods_updated == 'true' || steps.badges.outputs.last_good_updated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d)"
+          cd "$work_dir"
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git fetch --depth 1 origin status 2>/dev/null; then
+            git checkout -q FETCH_HEAD -b status
+          else
+            git checkout -q --orphan status
+          fi
+          for f in akmods-badge.json last-good-build-badge.json; do
+            if [ -f "$GITHUB_WORKSPACE/artifacts/$f" ]; then
+              cp "$GITHUB_WORKSPACE/artifacts/$f" "$f"
+            fi
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Badge content unchanged; nothing to commit."
+          else
+            git commit -q -m "Update status badges"
+            git push origin HEAD:status
+          fi
