@@ -1,8 +1,9 @@
 # Agent Notes
 
 Orientation for LLM agents (Claude Code, Codex, etc.) asked to investigate a
-failed build in this repo. Read this before digging through logs — almost every
-build failure here has the same shape, and the diagnosis is mechanical.
+failed build in this repo. Read this before digging through logs — most build
+failures here have the same shape, and the diagnosis is mechanical. For the
+ones that do not, see [Other failure modes](#other-failure-modes).
 
 Companion doc: [`docs/manual-input-check.md`](docs/manual-input-check.md) covers
 *pre-flight* checks before a Fedora major-release bump. This file covers
@@ -292,6 +293,41 @@ whole safety property. This keeps the stable kernel stream and confines the
 Do not "fix" this by loosening the glob in `zfs.sh` or making the kmod install
 non-fatal. A `kmod-zfs` built for a different kernel will not load, and the
 failure would move from the build to the boot.
+
+## Other failure modes
+
+Not every red build is skew. Before tracing upstream kernel versions, check
+*which step* failed — skew always dies inside `zfs.sh` during
+`Build Image`. A failure in a later step is something else.
+
+### Chunkah rechunk: `Argument list too long` (exit 126)
+
+Symptom, in `Rechunk Image with Chunkah`:
+
+```
+/home/runner/work/_temp/....sh: line NN: /usr/local/bin/podman: Argument list too long
+##[error]Process completed with exit code 126.
+```
+
+The image itself built fine; this is the re-layering step. `CHUNKAH_CONFIG_STR`
+is passed to `podman run -e`, and Linux caps a single argv/env string at
+`MAX_ARG_STRLEN` (32 pages = 128 KiB). A full `podman inspect` embeds per-layer
+data three times over (`RootFS.Layers`, `History`,
+`GraphDriver.Data.LowerDir`), so it grows with the base image's layer count and
+crossed the cap when Aurora went from 128 to 256 layers on 2026-08-25.
+
+The step now passes `--format '{{json .Config}}'`, which is what Chunkah
+documents `--config-str` as taking; `.Config` carries no per-layer data and
+stays ~1.5 KiB. If this recurs, look for something *else* in the pipeline
+piping large JSON through the environment rather than reverting to the full
+inspect.
+
+Layer count of the current base:
+
+```bash
+skopeo inspect --raw docker://ghcr.io/ublue-os/aurora-dx:stable \
+  | jq '.layers | length'
+```
 
 ## Incident log
 

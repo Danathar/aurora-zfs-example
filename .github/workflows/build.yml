@@ -153,8 +153,19 @@ jobs:
           source_image="localhost/${IMAGE_NAME}:${DEFAULT_TAG}"
           chunked_image="localhost/${IMAGE_NAME}:chunkah"
           archive=/tmp/chunkah-oci.tar
+          # Chunkah documents --config-str as taking the `.Config` element
+          # of a podman/docker inspect, not the whole document. A full
+          # inspect also carries RootFS.Layers, History and
+          # GraphDriver.Data.LowerDir, all of which scale with the base
+          # image's layer count. The value is handed to podman as an
+          # environment variable below, and Linux caps a single argv/env
+          # string at MAX_ARG_STRLEN (32 pages = 128 KiB); once the Aurora
+          # base grew from 128 to 256 layers the full form crossed that cap
+          # and exec failed with E2BIG ("Argument list too long", exit 126).
+          # `.Config` holds only Env/Cmd/WorkingDir/Labels and stays ~1.5 KiB
+          # no matter how many layers the base grows to.
           export CHUNKAH_CONFIG_STR
-          CHUNKAH_CONFIG_STR="$(podman inspect "${source_image}")"
+          CHUNKAH_CONFIG_STR="$(podman inspect --format '{{json .Config}}' "${source_image}")"
 
           echo "==> Disk usage before rechunk" && df -h / /mnt
 
