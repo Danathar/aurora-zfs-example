@@ -18,6 +18,7 @@ present and skipped when not.
 | `test-post-check.sh` | the pure helpers in `build_files/post-check.sh`, with `rpm`, `ldd` and `find` stubbed |
 | `test-post-check-checks.sh` | `check_kernel_tree` and `check_zfs_packages`, against a text stand-in for the RPM database |
 | `test-shell-syntax.sh` | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed |
+| `test-coverage.sh` | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason |
 | `test-docs-paths.sh` | every repo path README.md and AGENTS.md name actually exists |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
@@ -41,6 +42,20 @@ some time while the file was `renovate.json` at the repo root. It checks the
 "Repository Layout" block line by line, then the inline code spans, anchoring
 the filter on `git ls-files` so that GitHub `org/repo` references are skipped
 while anything rooted in a real top-level entry is enforced.
+
+## The coverage gate
+
+`test-coverage.sh` exists because a percentage would be meaningless here. Most
+of this repo's shell cannot be reached from the host at all, so a line-coverage
+threshold would either sit near zero forever or get gamed. What is worth
+enforcing is that the gap stays deliberate.
+
+It holds a manifest pairing every tracked `*.sh` outside `tests/` with either
+the test file that covers it or the literal `UNCOVERED` and a reason. Adding a
+script without touching that manifest turns the suite red, so the decision gets
+made once, in the open. It is checked in both directions — a stale entry left
+behind by a deleted script fails too, as does a "covered by" claim naming a test
+file that does not exist or never mentions the script.
 
 ## post-check.sh
 
@@ -91,6 +106,13 @@ branches remain untested.
 pull request and push, with `shellcheck` installed so that pass is enforced
 rather than skipped, and `build_push` has `needs: tests` so a red suite blocks
 the image build.
+
+`build.yml` sets `paths-ignore` for `README.md` and `docs/**` though, so a
+change touching only those starts no run there.
+`.github/workflows/coverage-gate.yml` triggers on exactly that complement and
+runs the same suite, so a docs-only change is no longer the one kind of change
+nothing verifies. One workflow or the other runs the suite; a change touching
+both docs and code trips both.
 
 Running on `pull_request` is what closes the gap this suite was written for:
 `ci/write-badges.sh` is executed by no other trigger here — the `Status badges`

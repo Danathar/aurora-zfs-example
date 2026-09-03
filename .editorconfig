@@ -1,0 +1,58 @@
+# https://editorconfig.org
+#
+# Encodes the conventions already in the tree rather than proposing new ones.
+# EditorConfig does not reformat existing files, so nothing here rewrites
+# anything; it stops an editor from introducing a diff that has no business
+# being in a PR.
+#
+# Note for anyone tempted to add a Prettier config alongside this: Prettier
+# respects .editorconfig, and `prettier --check` currently rejects seven files
+# in this tree, AGENTS.md and README.md among them. A formatter nothing runs,
+# whose first run would rewrite the two documents the repo treats as
+# load-bearing, is a liability rather than a convenience. Shell style is
+# enforced by .shellcheckrc, which CI actually runs.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Four-space shell, which is what build_files/ and tests/ use.
+[*.sh]
+indent_size = 4
+
+# ci/write-badges.sh is the one exception in the tree: two-space, and single
+# brackets. Left as it is, so declare it rather than let an editor fight it.
+[ci/write-badges.sh]
+indent_size = 2
+
+# tests/test-coverage.sh's MANIFEST is tab-separated and the tabs are load
+# bearing — they separate the script path from its covering test file.
+[tests/test-coverage.sh]
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.json]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+# Markdown gives meaning to two trailing spaces (a hard line break). This repo
+# does not use them, but stripping them silently is the kind of edit that turns
+# a docs PR into a formatting argument.
+trim_trailing_whitespace = false
+
+[Containerfile]
+indent_size = 4
+
+[LICENSE]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = false
