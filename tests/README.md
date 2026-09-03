@@ -16,6 +16,7 @@ present and skipped when not.
 | --- | --- |
 | `test-write-badges.sh` | `ci/write-badges.sh` end to end, with `skopeo` stubbed |
 | `test-post-check.sh` | the pure helpers in `build_files/post-check.sh`, with `rpm`, `ldd` and `find` stubbed |
+| `test-post-check-checks.sh` | `check_kernel_tree` and `check_zfs_packages`, against a text stand-in for the RPM database |
 | `test-shell-syntax.sh` | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
@@ -32,12 +33,9 @@ two properties its comments call deliberate:
 One case copies the checked-in `Containerfile` in as its fixture: if a stage is
 renamed or dropped, that test fails rather than the badge silently going stale.
 
-## Not covered
+## post-check.sh
 
-`build_files/post-check.sh`'s `check_*` functions run inside the image build
-against a real RPM database, module tree and initramfs, so they are not
-reachable from a test on the host. Its helpers are: the script guards its entry
-point with
+The script guards its entry point with
 
 ```bash
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -50,6 +48,28 @@ so sourcing it defines `require_glob`, `verify_rpm_payload`,
 `test-post-check.sh` calls them directly with a stub standing in for `rpm`,
 `ldd` or `find`, and asserts the guard in both directions: sourcing runs no
 check, executing still runs `main`.
+
+`test-post-check-checks.sh` goes one level up, to the `check_*` stages. Two of
+the six decide purely from what `rpm` and `find` report, so they run on any
+host: `check_kernel_tree` and `check_zfs_packages`. What is worth testing there
+is the wiring rather than any single call — which package names are demanded,
+which glob feeds the version comparison, and whether a verdict assembled from
+several `rpm` invocations survives. A stub that answers every query the same way
+cannot show that, so this file backs `rpm` with a small text database — one
+`NAME VERSION RELEASE ARCH` record per line — and lets the real queries run
+against it. That also keeps the stub honest about a detail the script depends
+on: `rpm -qa 'libzfs[0-9]*'` returns full `NVRA` strings that are handed
+straight back to `rpm -q --qf`, so both forms have to resolve.
+
+## Not covered
+
+`check_zfs_modules`, `check_zfs_userspace` and `check_initramfs` read absolute
+paths under `/usr/lib` and require `zfs`/`zpool`/`zdb`/`zed` on `PATH`. On any
+host that is not the finished image they fail before reaching the logic worth
+checking — the `spl`/`zfs` vermagic comparison, the `modules-load.d` content
+match and the `lsinitrd` listing — so covering them needs an injectable root
+prefix in the script itself. `check_rpm_payloads` is one call to
+`verify_rpm_payload`, which `test-post-check.sh` already covers.
 
 The other `build_files/*.sh` scripts still run their work at the top level, so
 `source` executes the whole file. Their happy path is exercised by the `Build
