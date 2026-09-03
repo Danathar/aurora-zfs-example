@@ -3,3 +3,7 @@ cosign.key
 _build_*
 output
 _build-*/**
+
+# Per-machine Claude Code settings. Anything meant to be shared belongs in a
+# tracked file, not this one.
+.claude/settings.local.json
