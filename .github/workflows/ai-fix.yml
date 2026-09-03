@@ -26,6 +26,13 @@ name: AI fix
 # boundary, and it is the whole reason this is "automated review application"
 # rather than "a bot writing to the repo on another bot's say-so".
 #
+# That rule is load-bearing here, not theoretical. `danathar-atomic-hive[bot]`
+# already applies `ai-fix-requested` to every ACMM issue it opens -- so without
+# it, an external system would start an agent in this repo on its own schedule.
+# `preflight` rejects a bot sender up front so those events cost nothing; the
+# action's own `allowed_bots` check is the real control and would catch it
+# regardless.
+#
 # `contents: write` is the one elevated grant. docs/SECURITY-AI.md lists granting
 # it to a new workflow as a decision that needs a human, and it got one -- it is
 # the minimum that pushing an `ai-fix/*` branch requires. What it deliberately
@@ -92,6 +99,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          SENDER: ${{ github.event.sender.login }}
           # Empty string when the secret is unset. Referenced only to test for
           # emptiness -- never echoed, and masked by Actions in any case.
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -133,7 +142,18 @@ jobs:
             echo
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [ "${configured}" = "no" ]; then
+          if [ "${SENDER_TYPE}" = "Bot" ]; then
+            run=no
+            {
+              echo "Skipped: triggered by \`${SENDER}\`, which is a bot."
+              echo
+              echo "The action would refuse this anyway -- \`allowed_bots\` is empty -- but"
+              echo "it is refused here so the run costs nothing. This is not hypothetical:"
+              echo "\`danathar-atomic-hive[bot]\` applies \`ai-fix-requested\` to every ACMM"
+              echo "issue it opens, and none of those should start an agent on their own."
+              echo "A maintainer who wants one relays it with \`@claude\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          elif [ "${configured}" = "no" ]; then
             run=no
             {
               echo "Skipped: no agent credentials are configured on this repository."
