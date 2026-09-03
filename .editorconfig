@@ -4,6 +4,13 @@
 # EditorConfig does not reformat existing files, so nothing here rewrites
 # anything; it stops an editor from introducing a diff that has no business
 # being in a PR.
+#
+# Note for anyone tempted to add a Prettier config alongside this: Prettier
+# respects .editorconfig, and `prettier --check` currently rejects seven files
+# in this tree, AGENTS.md and README.md among them. A formatter nothing runs,
+# whose first run would rewrite the two documents the repo treats as
+# load-bearing, is a liability rather than a convenience. Shell style is
+# enforced by .shellcheckrc, which CI actually runs.
 
 root = true
 
