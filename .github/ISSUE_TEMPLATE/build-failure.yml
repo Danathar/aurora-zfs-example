@@ -24,29 +24,41 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: skew-check
+  - type: markdown
     attributes:
-      label: akmods label comparison
-      description: >-
-        The whole diagnosis, from AGENTS.md. If these two differ, that is the
-        answer and the rest of this form barely matters.
       value: |
+        ### Run this before filling in the rest
+
+        Two labels decide almost every failure here. The release is read out of
+        the `Containerfile` rather than typed, so this keeps working after
+        `FEDORA_VERSION` moves:
+
         ```bash
-        FEDORA_VERSION=44
+        FEDORA_VERSION=$(curl -fsSL \
+          https://raw.githubusercontent.com/Danathar/aurora-zfs-simple/main/Containerfile \
+          | sed -n 's/^ARG FEDORA_VERSION=//p')
+        echo "targeting Fedora ${FEDORA_VERSION}"
+
         for img in akmods akmods-zfs; do
-          printf '%-12s %s\n' "$img" "$(skopeo inspect --format '{{ index .Labels "ostree.linux" }}' \
+          printf '%-12s %s\n' "$img" "$(skopeo inspect \
+            --format '{{ index .Labels "ostree.linux" }}' \
             "docker://ghcr.io/ublue-os/${img}:coreos-stable-${FEDORA_VERSION}-x86_64")"
         done
         ```
 
-        Output:
+        If the two values differ, that is the diagnosis and this repo is not at
+        fault. Report it anyway if you want it tracked.
 
-        ```
-        akmods
-        akmods-zfs
-        ```
-      render: markdown
+  - type: textarea
+    id: skew-check
+    attributes:
+      label: akmods label output
+      description: >-
+        Paste what the command above printed, including the Fedora version line.
+      placeholder: |-
+        targeting Fedora 44
+        akmods       6.19.14-101.fc44.x86_64
+        akmods-zfs   6.19.9-100.fc44.x86_64
     validations:
       required: true
 
@@ -55,12 +67,12 @@ body:
     attributes:
       label: Failing lines from the log
       description: >-
-        `gh run view <run-id> --log-failed` reports the step as `UNKNOWN STEP`
-        and dumps a lot of image-pull noise, so grep it.
-      value: |
-        ```
-        gh run view <run-id> --log-failed | grep -E "KERNEL=|Failed to access RPM|Error: building"
-        ```
+        From `gh run view <run-id> --log-failed`. It reports the step as
+        `UNKNOWN STEP` and dumps a lot of image-pull noise, so grep it:
+        `grep -E "KERNEL=|Failed to access RPM|Error: building"`.
+      placeholder: |-
+        + KERNEL=6.19.14-101.fc44.x86_64
+        Failed to access RPM "/tmp/rpms/kmods/zfs/kmod-zfs-6.19.14-101.fc44.x86_64*.rpm": No such file or directory
       render: shell
     validations:
       required: false

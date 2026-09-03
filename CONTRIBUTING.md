@@ -11,15 +11,26 @@ covers build-failure diagnosis in far more depth than this file.
 
 Check the README badges. **OpenZFS/kernel** reads the `ostree.linux` label off
 the two upstream akmods images this `Containerfile` pulls. When it says
-`blocked`, there is no `kmod-zfs` published for the kernel the build wants, the
-build cannot pass, and no change to this repo will make it pass. It clears when
-upstream re-converges.
+`blocked`, there is no `kmod-zfs` published for the kernel the build wants. It
+clears when upstream re-converges.
 
 That is the dominant failure mode here, it is anticipated in the `Containerfile`
-comments, and it is the same reason Aurora dropped ZFS. Do not send a PR
-"fixing" it. [`AGENTS.md`](AGENTS.md#dominant-failure-mode-kernel--zfs-akmod-skew)
-has the 60-second confirmation and the real fix options: wait, pin both akmods
-inputs together, or switch streams.
+comments, and it is the same reason Aurora dropped ZFS.
+
+Separate the root cause from the response, because they live in different
+places:
+
+- **The cause is not in this repo and cannot be fixed here.** No change on this
+  side makes upstream publish a `kmod-zfs` for a kernel OpenZFS does not yet
+  support. A PR that claims to "fix the ZFS build" is misreading the failure.
+- **The response can absolutely be a change here.** Pinning both akmods inputs
+  to the last kernel they agreed on restores green builds immediately, and
+  switching streams is the other documented option. These are real, supported
+  mitigations — not workarounds to be talked out of.
+
+[`AGENTS.md`](AGENTS.md#dominant-failure-mode-kernel--zfs-akmod-skew) has the
+60-second confirmation and how to choose between waiting, pinning and switching.
+Pin **both** inputs or neither; a half-pin is the one move guaranteed to break.
 
 ## Running the tests
 
