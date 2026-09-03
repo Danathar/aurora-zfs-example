@@ -1,0 +1,191 @@
+---
+name: Nightly compliance
+
+# Checks properties of the *published* image that no build-time step can check,
+# because they are only true after the push -- and can stop being true long
+# after the run that established them.
+#
+# `build.yml` verifies that every tag it pushes resolves to one manifest digest,
+# and then signs that digest. Both facts are asserted once, inside the run that
+# creates them. Nothing revisits the registry afterwards. A tag repointed by a
+# later partial push, a signature that no longer verifies against the committed
+# public key, an image deleted out from under consumers -- none of that is
+# visible to a workflow that only runs at build time.
+#
+# So this asks three questions daily:
+#
+#   1. Does the shell suite still pass?          (rot from the runner, not the tree)
+#   2. Is the published :latest still signed by the key in cosign.pub?
+#   3. Do the tags that should share :latest's digest still share it?
+#
+# Question 1 is not redundant with `build.yml`. That suite's shellcheck pass
+# depends on the shellcheck version the hosted runner ships, which changes
+# without any commit here; a nightly run is what turns "a future PR is suddenly
+# red for unrelated reasons" into "we knew on the 3rd".
+#
+# What this does NOT cover, so nobody reads more into a green run than it means:
+# it does not validate the *contents* of the published image. post-check.sh and
+# `bootc container lint` run inside the Containerfile, before Chunkah re-layers
+# the image, and nothing re-checks the re-layered result -- see docs/quality.md.
+# Closing that gap is tests/e2e/run-e2e.sh --rechunk, which is manual because it
+# takes tens of minutes and about 40G.
+
+on:
+  schedule:
+    - cron: '30 07 * * *'  # daily, after the 06:30 UTC badge refresh
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-compliance
+  cancel-in-progress: false
+
+jobs:
+  suite:
+    name: Shell suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      - name: Run shell test suite
+        run: ./tests/run-tests.sh
+
+  published_image:
+    name: Published image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      packages: read
+
+    env:
+      IMAGE_REF: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare environment
+        run: echo "IMAGE_REF=${IMAGE_REF,,}" >> "${GITHUB_ENV}"
+
+      - name: Ensure skopeo is present
+        run: |
+          set -eux
+          command -v skopeo || { sudo apt-get update && sudo apt-get install -y skopeo; }
+          skopeo --version
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.6.1'
+
+      # cosign reads ~/.docker/config.json; skopeo is given --creds explicitly
+      # below. Logging in keeps this working whether or not the package is
+      # public.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # A repository with no published image yet is not a compliance failure;
+      # it is a repository with nothing to check. Say so and stop.
+      - name: Resolve the published :latest
+        id: latest
+        env:
+          REGISTRY_ACTOR: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! raw=$(skopeo inspect --creds "${REGISTRY_ACTOR}:${REGISTRY_TOKEN}" \
+                       "docker://${IMAGE_REF}:latest" 2>err.txt); then
+            echo "No readable :latest at ${IMAGE_REF}:"
+            cat err.txt
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          digest=$(jq -r '.Digest' <<<"${raw}")
+          created=$(jq -r '.Created' <<<"${raw}")
+          # The date tags build.yml publishes come from the same run, so they
+          # carry the image's own creation date in UTC.
+          date_tag=$(date -u -d "${created}" +%Y%m%d)
+          {
+            echo "present=true"
+            echo "digest=${digest}"
+            echo "date_tag=${date_tag}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "${IMAGE_REF}:latest -> ${digest} (built ${created})"
+
+      # The property README's "Signature Verification" section tells consumers
+      # to rely on. Verified against the committed public key, not a key fetched
+      # at run time, so this fails if the published image stops matching what
+      # the repo tells people to trust.
+      - name: Verify the published signature
+        if: steps.latest.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          cosign verify --key cosign.pub "${IMAGE_REF}@${{ steps.latest.outputs.digest }}" > /dev/null
+          echo "Signature verifies against cosign.pub"
+
+      # build.yml asserts this at push time; this asserts it still holds. A tag
+      # that is absent is reported rather than failed -- a build straddling
+      # midnight UTC, or a tag deleted by hand, is not the drift being hunted.
+      # A tag that is present and disagrees is a real failure.
+      - name: Verify the date tags still share that digest
+        if: steps.latest.outputs.present == 'true'
+        env:
+          REGISTRY_ACTOR: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          EXPECTED: ${{ steps.latest.outputs.digest }}
+          DATE_TAG: ${{ steps.latest.outputs.date_tag }}
+        run: |
+          set -euo pipefail
+          status=0
+          for tag in "latest.${DATE_TAG}" "${DATE_TAG}"; do
+            if ! actual=$(skopeo inspect --format '{{.Digest}}' \
+                            --creds "${REGISTRY_ACTOR}:${REGISTRY_TOKEN}" \
+                            "docker://${IMAGE_REF}:${tag}" 2>/dev/null); then
+              echo "::warning::${tag} is not published; skipping"
+              continue
+            fi
+            if [ "${actual}" != "${EXPECTED}" ]; then
+              echo "::error::${tag} resolves to ${actual}, expected ${EXPECTED}"
+              status=1
+            else
+              echo "${tag} -> ${actual} OK"
+            fi
+          done
+          exit "${status}"
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "### Nightly compliance"
+            echo
+            if [ "${{ steps.latest.outputs.present }}" != "true" ]; then
+              echo "No published \`:latest\` to check."
+            else
+              echo "- image: \`${IMAGE_REF}:latest\`"
+              echo "- digest: \`${{ steps.latest.outputs.digest }}\`"
+              echo "- date tags checked: \`latest.${{ steps.latest.outputs.date_tag }}\`, \`${{ steps.latest.outputs.date_tag }}\`"
+            fi
+            echo
+            echo "Post-rechunk image *contents* are not validated here; that is"
+            echo "\`tests/e2e/run-e2e.sh --rechunk\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

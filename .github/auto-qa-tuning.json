@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "Declared CI timeouts, and the policy for deciding when they no longer match",
+    "reality. Read by .github/workflows/auto-qa.yml.",
+    "",
+    "This repo has no numeric quality thresholds to tune. Coverage is a recorded",
+    "decision rather than a percentage (tests/test-coverage.sh explains why), and",
+    "the shellcheck bar is zero output, which is not a dial. What genuinely",
+    "drifts here is job duration: the image build tracks the size and layer count",
+    "of an upstream base this repo does not control, so a timeout that was",
+    "generous when it was written can quietly become tight.",
+    "",
+    "The statistic is the MAXIMUM observed duration, not a percentile. A timeout",
+    "has to cover the worst run, not the typical one -- a p95 that fits tells you",
+    "nothing about the 1-in-20 run that gets killed at the cap.",
+    "",
+    "Keep timeout_minutes in step with the workflow files. The workflow reports a",
+    "mismatch it cannot see; it reads the numbers here, not the YAML."
+  ],
+
+  "policy": {
+    "statistic": "max",
+    "sample_size": 20,
+
+    "_at_risk_ratio": [
+      "Fail when the slowest recent run exceeds this fraction of the timeout.",
+      "At 0.75 a job that has grown to three quarters of its cap is reported",
+      "while there is still room to react, rather than after the first run dies."
+    ],
+    "at_risk_ratio": 0.75,
+
+    "_loose_ratio": [
+      "Advisory only, never a failure. A timeout more than five times the",
+      "slowest observed run is not harmful, it just means a hung job burns that",
+      "long before the runner reclaims it."
+    ],
+    "loose_ratio": 0.2
+  },
+
+  "jobs": [
+    {
+      "workflow": "build.yml",
+      "job": "Shell tests",
+      "timeout_minutes": 10
+    },
+    {
+      "workflow": "build.yml",
+      "job": "Build and push image",
+      "timeout_minutes": 90,
+      "note": "Scales with the upstream Aurora base; the one entry here that is expected to move."
+    },
+    {
+      "workflow": "coverage-gate.yml",
+      "job": "Shell tests",
+      "timeout_minutes": 10
+    },
+    {
+      "workflow": "nightly-compliance.yml",
+      "job": "Shell suite",
+      "timeout_minutes": 10
+    },
+    {
+      "workflow": "nightly-compliance.yml",
+      "job": "Published image",
+      "timeout_minutes": 15
+    },
+    {
+      "workflow": "labeler.yml",
+      "job": "Apply area labels",
+      "timeout_minutes": 5
+    }
+  ]
+}
