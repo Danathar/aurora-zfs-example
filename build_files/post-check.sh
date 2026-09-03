@@ -279,4 +279,10 @@ main() {
     log "all checks passed"
 }
 
-main "$@"
+# Only run the checks when this file is executed. Sourcing it defines the
+# helpers without touching the system, which is what lets tests/test-post-check.sh
+# exercise require_glob, verify_rpm_payload and require_single_rpm_version
+# directly instead of only through a 40-minute image build.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
