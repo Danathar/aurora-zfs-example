@@ -32,6 +32,17 @@ two properties its comments call deliberate:
 One case copies the checked-in `Containerfile` in as its fixture: if a stage is
 renamed or dropped, that test fails rather than the badge silently going stale.
 
+## End-to-end
+
+`tests/e2e/run-e2e.sh` builds the real image with podman and checks the real
+artifact. It is not part of this suite — `run-tests.sh` globs `test-*.sh` at
+`maxdepth 1` — because it takes tens of minutes and about 40G.
+
+Its `--rechunk` mode covers the one thing nothing else does: `post-check.sh` and
+`bootc container lint` are `RUN` steps, so they validate the image *before* the
+workflow hands it to Chunkah, and nothing re-checks the re-layered result before
+it is pushed and signed. See [`e2e/README.md`](e2e/README.md).
+
 ## Not covered
 
 `build_files/post-check.sh`'s `check_*` functions run inside the image build
