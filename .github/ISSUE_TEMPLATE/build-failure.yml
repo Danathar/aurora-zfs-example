@@ -1,0 +1,79 @@
+---
+name: Build failure
+description: The Build container image workflow is red
+labels: ["build-failure"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Check the README badges first.** If the **OpenZFS/kernel** badge says
+        `blocked`, the two upstream akmods images disagree on a kernel version
+        and there is no `kmod-zfs` for the kernel the build wants. That is the
+        near-universal cause of a red build here, it is not a defect in this
+        repo, and it clears on its own when upstream re-converges.
+
+        Open this anyway if you want it tracked — just say so below, so nobody
+        spends an afternoon rediscovering it.
+
+  - type: input
+    id: run-url
+    attributes:
+      label: Failed run
+      description: Link to the Actions run.
+      placeholder: https://github.com/Danathar/aurora-zfs-simple/actions/runs/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: skew-check
+    attributes:
+      label: akmods label comparison
+      description: >-
+        The whole diagnosis, from AGENTS.md. If these two differ, that is the
+        answer and the rest of this form barely matters.
+      value: |
+        ```bash
+        FEDORA_VERSION=44
+        for img in akmods akmods-zfs; do
+          printf '%-12s %s\n' "$img" "$(skopeo inspect --format '{{ index .Labels "ostree.linux" }}' \
+            "docker://ghcr.io/ublue-os/${img}:coreos-stable-${FEDORA_VERSION}-x86_64")"
+        done
+        ```
+
+        Output:
+
+        ```
+        akmods
+        akmods-zfs
+        ```
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: failure-lines
+    attributes:
+      label: Failing lines from the log
+      description: >-
+        `gh run view <run-id> --log-failed` reports the step as `UNKNOWN STEP`
+        and dumps a lot of image-pull noise, so grep it.
+      value: |
+        ```
+        gh run view <run-id> --log-failed | grep -E "KERNEL=|Failed to access RPM|Error: building"
+        ```
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Which shape is it?
+      options:
+        - kmod-zfs glob matched nothing, ZFS userspace RPMs resolved fine
+        - Chunkah rechunk failed (exit 126, Argument list too long)
+        - post-check.sh rejected the finished image
+        - Fedora version guard in the Containerfile fired
+        - Something else / not sure
+    validations:
+      required: true
