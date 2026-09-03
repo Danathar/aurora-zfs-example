@@ -68,9 +68,20 @@ it is removed unconditionally on exit, `--clean` or not. Otherwise a rechunk
 that died on a full disk would leave several more gigabytes behind on the disk
 that was already full.
 
-It is written beside podman's storage rather than to `TMPDIR`, because `/tmp` is
-tmpfs on a typical Fedora or Aurora host — the archive is measured in gigabytes
-and would go to RAM. Override with `E2E_ARCHIVE_DIR` if you want it elsewhere.
+It is written beside podman's storage rather than to `TMPDIR`, and `podman load`
+is pointed at the same place. This matters more here than it would elsewhere:
+Aurora **is** a Fedora Atomic desktop, so anyone running this has a tmpfs
+`/tmp`. On the machine this was written on that is 31G of RAM, against 532G of
+disk shared by `/var/tmp` and podman's storage. Both the archive and the load's
+unpack are measured in gigabytes, so the default would have failed on a host
+with hundreds of free gigabytes.
+
+`podman load` needs this separately from the archive, because it expands the
+archive into `TMPDIR` before applying it — the same reason `build.yml` runs it
+as `TMPDIR=/mnt/tmp podman load`.
+
+Set `E2E_ARCHIVE_DIR` to move both; `/var/tmp` is the other sensible choice on
+an Atomic host.
 
 The free-space check follows the same reasoning: it probes the filesystems that
 actually receive data (podman's graph root, and the archive directory under

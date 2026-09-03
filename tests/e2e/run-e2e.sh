@@ -36,9 +36,11 @@
 #   ./tests/e2e/run-e2e.sh --clean         # also remove the images it made
 #   ./tests/e2e/run-e2e.sh --keep-going    # report every failed check, not just the first
 #
-# E2E_ARCHIVE_DIR overrides where the --rechunk archive is written. It defaults
-# to podman's storage filesystem rather than TMPDIR, because /tmp is tmpfs on a
-# typical Fedora/Aurora host and the archive is measured in gigabytes.
+# E2E_ARCHIVE_DIR overrides where the --rechunk archive is written, and where
+# `podman load` is pointed to unpack it. Both default to podman's storage
+# filesystem rather than TMPDIR: Aurora is a Fedora Atomic desktop, so /tmp is
+# tmpfs, and both of these are measured in gigabytes. /var/tmp is the other
+# sensible choice on such a host.
 
 set -euo pipefail
 
@@ -110,6 +112,9 @@ cleanup() {
         printf '\n==> Removing temporary archive %s\n' "${ARCHIVE}"
         rm -f "${ARCHIVE}"
     fi
+    if [[ -n "${LOAD_TMPDIR}" && -d "${LOAD_TMPDIR}" ]]; then
+        rm -rf "${LOAD_TMPDIR}"
+    fi
 
     # Images are only removed when asked, and only the exact tags this run made.
     [[ "${CLEAN}" -eq 1 ]] || return 0
@@ -141,13 +146,22 @@ printf '  podman %s\n' "$(podman --version | awk '{print $3}')"
 graph_root="$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null || true)"
 [[ -n "${graph_root}" ]] || graph_root="${HOME}/.local/share/containers/storage"
 
-# TMPDIR is the wrong default for a multi-gigabyte archive: on this repo's
-# usual hosts /tmp is tmpfs, so the archive would be written to RAM and the
-# rechunk would die on a machine with hundreds of free gigabytes. Default it
-# beside podman's storage instead, which is by definition sized for images.
-# The workflow puts the two on separate disks because a GitHub runner has two;
-# a workstation generally has one filesystem with room.
+# TMPDIR is the wrong default here, and specifically wrong for this project's
+# audience. Aurora is a Fedora Atomic desktop, where /tmp is tmpfs — on the
+# machine this was written on, /tmp is 31G of RAM while /var/tmp and podman's
+# storage share 532G of disk. A multi-gigabyte archive sent to /tmp would fail
+# on a host with hundreds of free gigabytes.
+#
+# Default beside podman's storage instead, which is by definition sized for
+# images. The workflow puts archive and storage on separate disks because a
+# GitHub runner has two; a workstation generally has one filesystem with room.
 ARCHIVE_DIR="${E2E_ARCHIVE_DIR:-$(dirname "${graph_root}")}"
+
+# `podman load` unpacks the archive into TMPDIR before applying it, so the load
+# needs the same treatment as the archive — this is why the workflow runs it as
+# `TMPDIR=/mnt/tmp podman load`. Without this the archive lands correctly and
+# the load still tries to expand it in tmpfs.
+LOAD_TMPDIR="${ARCHIVE_DIR}/e2e-load-tmp.$$"
 
 targets=("${graph_root}")
 [[ "${RECHUNK}" -eq 1 ]] && targets+=("${ARCHIVE_DIR}")
@@ -224,9 +238,12 @@ if [[ "${RECHUNK}" -eq 1 ]]; then
         --tag "${CHUNKED_TAG}" >"${ARCHIVE}"
 
     CREATED_TAGS+=("${CHUNKED_TAG}")
-    podman load -i "${ARCHIVE}"
+    mkdir -p "${LOAD_TMPDIR}"
+    TMPDIR="${LOAD_TMPDIR}" podman load -i "${ARCHIVE}"
+    rm -rf "${LOAD_TMPDIR}"
     rm -f "${ARCHIVE}"
     ARCHIVE=""
+LOAD_TMPDIR=""
 
     TARGET="${CHUNKED_TAG}"
     pass "Chunkah produced a loadable image"
