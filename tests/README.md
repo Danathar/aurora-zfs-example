@@ -20,6 +20,7 @@ present and skipped when not.
 | `test-shell-syntax.sh`      | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed            |
 | `test-coverage.sh`          | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason        |
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
+| `test-ci-workflows.sh`      | CI still runs this suite, and the two workflows' path filters leave no change unverified  |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -67,6 +68,28 @@ script without touching that manifest turns the suite red, so the decision gets
 made once, in the open. It is checked in both directions — a stale entry left
 behind by a deleted script fails too, as does a "covered by" claim naming a test
 file that does not exist or never mentions the script.
+
+## The CI invariants
+
+`test-coverage.sh` asserts that a decision was recorded for every shipped
+script. It says nothing about whether CI still runs any of this, and until
+`test-ci-workflows.sh` nothing in `tests/` did: deleting the `Shell tests` job,
+dropping `needs: tests` from `build_push`, or narrowing a path filter left every
+test green while the only host-side gate stopped gating.
+
+The path filters are the part worth a test rather than a comment. `build.yml`
+ignores `README.md` and `docs/**`; `coverage-gate.yml` triggers on exactly that
+complement, which is what keeps a docs-only change from running no suite at all.
+Add a path to `paths-ignore` without adding it to `coverage-gate.yml` and that
+class of change silently stops being verified. The test asserts the one
+direction that matters — every path `build.yml` ignores is a path
+`coverage-gate.yml` triggers on — and not the reverse, which does not hold on
+purpose: `coverage-gate.yml` also triggers on `**/README.md`, so a pull request
+touching only `tests/README.md` runs the suite twice.
+
+It reads the YAML with a small indentation-anchored parser rather than a
+dependency, and asserts each extraction is non-empty, so a reformat it cannot
+follow fails the suite instead of passing it vacuously.
 
 ## post-check.sh
 
