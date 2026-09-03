@@ -2,7 +2,7 @@
 description: Diagnose a red Build container image run — skew or not, with evidence
 ---
 
-Follow [`.github/prompts/diagnose-build-failure.md`](../../.github/prompts/diagnose-build-failure.md).
+Follow [`.github/prompts/diagnose-build-failure.prompt.md`](../../.github/prompts/diagnose-build-failure.prompt.md).
 
 That file is the procedure; do not restate it here. In particular:
 

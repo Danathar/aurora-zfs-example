@@ -1,3 +1,8 @@
+---
+description: Pin both akmods inputs to a matching kernel, or unpin them
+mode: agent
+---
+
 # Pin the akmods inputs
 
 Use when skew is confirmed and waiting is no longer acceptable — each week spent

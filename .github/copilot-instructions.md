@@ -9,8 +9,16 @@ been bitten by documentation that stopped matching the tree.
 ## What this repo is
 
 A thin Aurora DX derivative that adds ZFS back. It does **not** compile ZFS. It
-assembles three prebuilt Universal Blue artifacts, and its correctness depends
-entirely on those three agreeing about the kernel version.
+assembles three prebuilt Universal Blue artifacts: the Aurora base, `akmods`,
+and `akmods-zfs`.
+
+Its correctness depends on **two** of those agreeing about the kernel version:
+`akmods` and `akmods-zfs`. The Aurora base is not one of them.
+`build_files/kernel-akmods.sh` erases Aurora's kernel RPMs outright and installs
+the one from the akmods stream, so this image legitimately runs a newer kernel
+than Aurora stable whenever that stream is ahead. **That is the design, not a
+fault.** Never recommend a downgrade or a pin on the strength of the base
+image's kernel differing.
 
 ## The one thing to internalise
 
@@ -21,9 +29,9 @@ freezes upstream and this repo breaks the next time it builds.
 
 Before proposing any change to a failing build, confirm the cause: compare the
 `ostree.linux` label on `ghcr.io/ublue-os/akmods` and
-`ghcr.io/ublue-os/akmods-zfs` for the release the `Containerfile` targets. If
-they differ, that is the answer. AGENTS.md has the exact commands and the fix
-options.
+`ghcr.io/ublue-os/akmods-zfs` for the release the `Containerfile` targets —
+those two labels, and nothing else, decide it. If they differ, that is the
+answer. AGENTS.md has the exact commands and the fix options.
 
 Never "fix" that failure by loosening the `kmod-zfs` glob in
 `build_files/zfs.sh` or making the install non-fatal. A kmod built for a

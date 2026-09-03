@@ -1,3 +1,8 @@
+---
+description: Pre-flight the upstream inputs before moving FEDORA_VERSION
+mode: agent
+---
+
 # Move to the next Fedora release
 
 `docs/manual-input-check.md` is the procedure. This is the decision framing

@@ -2,7 +2,7 @@
 description: Pre-flight the upstream inputs before moving FEDORA_VERSION
 ---
 
-Follow [`.github/prompts/bump-fedora-version.md`](../../.github/prompts/bump-fedora-version.md),
+Follow [`.github/prompts/bump-fedora-version.prompt.md`](../../.github/prompts/bump-fedora-version.prompt.md),
 which frames the decision, and run the checks in
 [`docs/manual-input-check.md`](../../docs/manual-input-check.md).
 

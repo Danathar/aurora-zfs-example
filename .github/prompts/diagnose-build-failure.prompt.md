@@ -1,3 +1,8 @@
+---
+description: Work out why a Build container image run is red, with evidence
+mode: agent
+---
+
 # Diagnose a failed build
 
 Goal: name the cause with evidence, and say which fix applies. Not: make the
