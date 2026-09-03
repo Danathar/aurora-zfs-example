@@ -17,6 +17,7 @@ present and skipped when not.
 | `test-write-badges.sh` | `ci/write-badges.sh` end to end, with `skopeo` stubbed |
 | `test-post-check.sh` | the pure helpers in `build_files/post-check.sh`, with `rpm`, `ldd` and `find` stubbed |
 | `test-shell-syntax.sh` | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed |
+| `test-docs-paths.sh` | every repo path README.md and AGENTS.md name actually exists |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -31,6 +32,14 @@ two properties its comments call deliberate:
 
 One case copies the checked-in `Containerfile` in as its fixture: if a stage is
 renamed or dropped, that test fails rather than the badge silently going stale.
+
+`test-docs-paths.sh` applies the same idea to the prose. AGENTS.md tells an
+agent mid-incident to trust these two documents, so a path they name that does
+not exist is a real defect — README.md advertised `.github/renovate.json5` for
+some time while the file was `renovate.json` at the repo root. It checks the
+"Repository Layout" block line by line, then the inline code spans, anchoring
+the filter on `git ls-files` so that GitHub `org/repo` references are skipped
+while anything rooted in a real top-level entry is enforced.
 
 ## Not covered
 
