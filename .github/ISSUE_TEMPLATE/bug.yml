@@ -1,0 +1,56 @@
+---
+name: Bug
+description: Something in this repo is wrong, other than a red build
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a failing `Build container image` run, use the **Build failure**
+        template instead — it asks for the two labels that decide almost every
+        one of those.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong
+      description: >-
+        Include where. A script, a workflow step, a claim in README.md or
+        AGENTS.md that no longer matches the code.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        Commands and their output, a log excerpt, or the two lines that
+        contradict each other. Enough that someone can confirm it without
+        guessing.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - build_files (in-image build scripts)
+        - Containerfile
+        - ci/write-badges.sh or the status badges
+        - GitHub Actions workflows
+        - tests
+        - docs (README.md / AGENTS.md / docs/)
+        - Installed image behaviour after a rebase
+        - Not sure
+    validations:
+      required: true

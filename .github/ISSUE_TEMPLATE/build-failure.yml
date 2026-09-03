@@ -1,0 +1,91 @@
+---
+name: Build failure
+description: The Build container image workflow is red
+labels: ["build-failure"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Check the README badges first.** If the **OpenZFS/kernel** badge says
+        `blocked`, the two upstream akmods images disagree on a kernel version
+        and there is no `kmod-zfs` for the kernel the build wants. That is the
+        near-universal cause of a red build here, it is not a defect in this
+        repo, and it clears on its own when upstream re-converges.
+
+        Open this anyway if you want it tracked — just say so below, so nobody
+        spends an afternoon rediscovering it.
+
+  - type: input
+    id: run-url
+    attributes:
+      label: Failed run
+      description: Link to the Actions run.
+      placeholder: https://github.com/Danathar/aurora-zfs-simple/actions/runs/...
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Run this before filling in the rest
+
+        Two labels decide almost every failure here. The release is read out of
+        the `Containerfile` rather than typed, so this keeps working after
+        `FEDORA_VERSION` moves:
+
+        ```bash
+        FEDORA_VERSION=$(curl -fsSL \
+          https://raw.githubusercontent.com/Danathar/aurora-zfs-simple/main/Containerfile \
+          | sed -n 's/^ARG FEDORA_VERSION=//p')
+        echo "targeting Fedora ${FEDORA_VERSION}"
+
+        for img in akmods akmods-zfs; do
+          printf '%-12s %s\n' "$img" "$(skopeo inspect \
+            --format '{{ index .Labels "ostree.linux" }}' \
+            "docker://ghcr.io/ublue-os/${img}:coreos-stable-${FEDORA_VERSION}-x86_64")"
+        done
+        ```
+
+        If the two values differ, that is the diagnosis and this repo is not at
+        fault. Report it anyway if you want it tracked.
+
+  - type: textarea
+    id: skew-check
+    attributes:
+      label: akmods label output
+      description: >-
+        Paste what the command above printed, including the Fedora version line.
+      placeholder: |-
+        targeting Fedora 44
+        akmods       6.19.14-101.fc44.x86_64
+        akmods-zfs   6.19.9-100.fc44.x86_64
+    validations:
+      required: true
+
+  - type: textarea
+    id: failure-lines
+    attributes:
+      label: Failing lines from the log
+      description: >-
+        From `gh run view <run-id> --log-failed`. It reports the step as
+        `UNKNOWN STEP` and dumps a lot of image-pull noise, so grep it:
+        `grep -E "KERNEL=|Failed to access RPM|Error: building"`.
+      placeholder: |-
+        + KERNEL=6.19.14-101.fc44.x86_64
+        Failed to access RPM "/tmp/rpms/kmods/zfs/kmod-zfs-6.19.14-101.fc44.x86_64*.rpm": No such file or directory
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Which shape is it?
+      options:
+        - kmod-zfs glob matched nothing, ZFS userspace RPMs resolved fine
+        - Chunkah rechunk failed (exit 126, Argument list too long)
+        - post-check.sh rejected the finished image
+        - Fedora version guard in the Containerfile fired
+        - Something else / not sure
+    validations:
+      required: true
