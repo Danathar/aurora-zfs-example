@@ -160,13 +160,23 @@ credentials are absent rather than failing loudly, and never touch `main`
 directly.
 
 [`.github/workflows/ai-fix.yml`](../.github/workflows/ai-fix.yml) is that
-workflow. Label an issue `ai-fix-requested`, or say `@claude` in a comment or a
-review thread, and it opens a pull request from an `ai-fix/*` branch. How it
-meets each condition, and the two points worth knowing:
+workflow. Label an issue `ai-fix-requested`, or comment `@claude` on an issue or
+a pull request, and it opens a pull request from an `ai-fix/*` branch. How it
+meets each condition, and the points worth knowing:
 
-- Its triggers — `issues`, `issue_comment`, `pull_request_review` and
-  `pull_request_review_comment` — always run the default branch's copy of the
-  file, so a pull request cannot edit the workflow that acts on it.
+- Its triggers — `issues` and `issue_comment` — run the default branch's copy of
+  the file, so a pull request cannot edit the workflow that acts on it. **Check
+  this before adding a trigger.** It is the property the `contents: write` grant
+  below rests on, and not every event has it: the workflow originally also
+  listened on `pull_request_review` and `pull_request_review_comment` so a
+  finding could be relayed from inside its own review thread, which was nicer to
+  use and wrong. That family runs the *head* branch's copy, exactly as
+  `pull_request` does — verified on this repository, where a review reply
+  produced a run at the branch tip executing a workflow file that did not exist
+  on `main`. A job holding `contents: write` that can be reached by editing its
+  own trigger on a branch is a real escalation, so the triggers went rather than
+  the permissions. The cost is that the relay is a pull request comment rather
+  than an inline review reply.
 - **A bot cannot start it.** `allowed_bots` is empty and only a user with write
   access can trigger it. `chatgpt-codex-connector[bot]` posting a finding does
   nothing on its own; a maintainer who has read the finding and agrees with it

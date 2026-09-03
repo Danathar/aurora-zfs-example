@@ -12,10 +12,26 @@ name: AI fix
 # absent rather than failing loudly, and never touch `main` directly. Each of
 # those is a concrete choice below, and each is worth reading before changing:
 #
-# `issues`, `issue_comment`, `pull_request_review` and `pull_request_review_comment`
-# always run the *default branch's* copy of this file. A pull request cannot edit
-# the workflow that reviews it -- an edit here only takes effect once it is merged,
-# by a human, through the normal review path.
+# `issues` and `issue_comment` run the *default branch's* copy of this file. A
+# pull request cannot edit the workflow that acts on it -- an edit here only takes
+# effect once it is merged, by a human, through the normal review path. That is
+# the property the elevated permissions below rest on.
+#
+# It is also why the review-thread triggers are gone. This started with
+# `pull_request_review` and `pull_request_review_comment` as well, so a maintainer
+# could relay a Codex finding from inside the thread it was raised in, and the
+# comment here claimed all four ran from the default branch. Three of those were
+# right. Adding this file on a branch and replying on a review thread produced a
+# run whose head_sha was the *branch tip*, executing a workflow that did not exist
+# on `main` at all -- the pull_request_review family runs the head's copy, like
+# `pull_request` does. A job holding `contents: write` and reachable by editing
+# its own trigger on a branch is the shape of a real escalation, so the triggers
+# went rather than the permissions.
+#
+# The cost is small and worth naming: the relay is a pull request *comment*
+# mentioning `@claude`, not an inline reply on the review thread. `issue_comment`
+# fires for pull requests too, so the flow survives; it just happens one box lower
+# down the page.
 #
 # Only a human with write access can trigger it. `allowed_bots` is empty, which is
 # the action's default and is set explicitly here because the default matters:
@@ -58,17 +74,11 @@ on:
   issue_comment:
     types:
       - created
-  pull_request_review:
-    types:
-      - submitted
-  pull_request_review_comment:
-    types:
-      - created
 
 concurrency:
   # One agent per issue or pull request. Not cancel-in-progress: a run that is
   # already pushing commits should finish rather than leave a half-written branch.
-  group: ai-fix-${{ github.event.issue.number || github.event.pull_request.number }}
+  group: ai-fix-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
@@ -81,9 +91,7 @@ jobs:
     # The precise checks -- write access, trigger phrase -- belong to the action.
     if: >-
       (github.event_name == 'issues' && github.event.label.name == 'ai-fix-requested') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
 
     permissions:
       contents: read
@@ -105,7 +113,6 @@ jobs:
           # emptiness -- never echoed, and masked by Actions in any case.
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          PR_FROM_REVIEW: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_IS_PR: ${{ github.event.issue.pull_request != null }}
         run: |
@@ -117,18 +124,17 @@ jobs:
             configured=no
           fi
 
-          # Which pull request, if any, is this event about?
+          # Which pull request, if any, is this event about? `issue_comment`
+          # covers both: GitHub delivers a comment on a pull request as an issue
+          # comment, with `.issue.pull_request` present to tell them apart.
           pr=""
-          case "${EVENT}" in
-            pull_request_review|pull_request_review_comment) pr="${PR_FROM_REVIEW}" ;;
-            issue_comment)
-              # Not `[ ... ] && pr=...`: under `set -e` a false test would end
-              # the step, so an ordinary comment on a plain issue would fail here.
-              if [ "${ISSUE_IS_PR}" = "true" ]; then
-                pr="${ISSUE_NUMBER}"
-              fi
-              ;;
-          esac
+          if [ "${EVENT}" = "issue_comment" ]; then
+            # Not `[ ... ] && pr=...`: under `set -e` a false test would end the
+            # step, so an ordinary comment on a plain issue would fail here.
+            if [ "${ISSUE_IS_PR}" = "true" ]; then
+              pr="${ISSUE_NUMBER}"
+            fi
+          fi
 
           same_repo=yes
           if [ -n "${pr}" ]; then
