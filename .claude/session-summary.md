@@ -52,6 +52,25 @@ the maintainer wants the tradeoff changed.
 
 ## Before you start anything
 
-Check the OpenZFS/kernel badge. If it says `blocked`, upstream akmod skew is in
-progress, the build cannot pass, and the response — wait, pin both inputs, or
-switch streams — is in `AGENTS.md`. Do not attempt a code fix for it.
+Check the OpenZFS/kernel badge. If it says `blocked`, upstream akmod skew is the
+likely cause and the response — wait, pin both inputs, or switch streams — is in
+`AGENTS.md`.
+
+**Confirm it against the live labels before acting on it.** `ci/write-badges.sh`
+deliberately leaves a badge at its last value when it cannot read an input, so
+`blocked` can outlive the skew it described: a transient registry error during
+the daily run is enough, and the badge will then still say `blocked` after
+upstream has re-converged. That is the badge working as designed, not a bug, but
+it means the badge is a strong hint and not a verdict.
+
+```bash
+FEDORA_VERSION=$(sed -n 's/^ARG FEDORA_VERSION=//p' Containerfile)
+for img in akmods akmods-zfs; do
+  printf '%-12s %s\n' "$img" "$(skopeo inspect --format '{{ index .Labels "ostree.linux" }}' \
+    "docker://ghcr.io/ublue-os/${img}:coreos-stable-${FEDORA_VERSION}-x86_64")"
+done
+```
+
+Identical labels mean the skew has cleared and the red build is something else —
+investigate it rather than waiting. Only a live mismatch justifies "do not
+attempt a code fix".

@@ -15,10 +15,10 @@
       "Bash(gh run view:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr view:*)",
-      "Bash(gh api repos/:*)",
       "Bash(skopeo inspect:*)"
     ],
     "ask": [
+      "Bash(gh api:*)",
       "Bash(podman build:*)",
       "Bash(podman rmi:*)",
       "Bash(podman run:*)",
@@ -52,5 +52,6 @@
         ]
       }
     ]
-  }
+  },
+  "_note_gh_api": "gh api is intentionally in `ask`, never `allow`. Permission rules match by command prefix, and `gh api` switches to POST as soon as -f/-F is present and honours -X for any method. An allow rule such as Bash(gh api repos/:*) would therefore approve mutations, including the workflow-dispatch endpoint that `gh workflow run` is listed under `ask` to gate."
 }

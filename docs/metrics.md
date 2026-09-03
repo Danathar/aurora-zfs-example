@@ -86,9 +86,9 @@ means one miss is routine.
 ## Deliberately not tracked
 
 - **Test coverage percentage.** Most of this repo's shell only runs inside an
-  image build and cannot be reached from the host. A percentage would sit near
-  zero or be gamed. What is enforced instead is that every script is explicitly
-  declared covered or uncovered-with-a-reason.
+  image build and cannot be reached from the host, so a percentage would sit
+  near zero or be gamed. What `tests/README.md` tracks instead is which scripts
+  are unreachable and why — a stated decision per script rather than a number.
 - **Time to merge.** Single maintainer; it measures availability, not process.
 - **Image size over time.** Chunkah's layering makes this non-comparable across
   base-image changes, and nothing acts on the number.
