@@ -65,12 +65,12 @@ the PR needs to say why it no longer applies.
 The question is not "are there tests" but "was the right kind of evidence
 offered":
 
-| Change to | Evidence |
-| --- | --- |
-| `ci/write-badges.sh`, `tests/` | The shell suite, run with `shellcheck` installed |
+| Change to                       | Evidence                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `ci/write-badges.sh`, `tests/`  | The shell suite, run with `shellcheck` installed                                                 |
 | `build_files/`, `Containerfile` | A green `Build container image` run on the PR, or an explicit statement that it was not verified |
-| Workflows | Reason carefully; a workflow change is often only testable by merging |
-| Docs | Read the code it describes |
+| Workflows                       | Reason carefully; a workflow change is often only testable by merging                            |
+| Docs                            | Read the code it describes                                                                       |
 
 "Tests pass" on a `build_files/` change means nothing — the suite cannot reach
 that code. A PR that says "not verified, here is why" is more useful than one

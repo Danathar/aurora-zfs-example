@@ -40,11 +40,11 @@ entirely on those three agreeing about one thing: **the kernel version**.
 
 ## The three upstream inputs
 
-| Input | Referenced at | Provides |
-|---|---|---|
-| `ghcr.io/ublue-os/aurora-dx:stable` | [`Containerfile`](Containerfile) `AURORA_IMAGE`/`AURORA_TAG` | The base OS. Its own kernel is discarded. |
-| `ghcr.io/ublue-os/akmods:coreos-stable-<N>-x86_64` | [`Containerfile`](Containerfile) `FROM ... AS akmods` | `/kernel-rpms` (**the kernel actually shipped**) plus common kmods (xone, v4l2loopback). |
-| `ghcr.io/ublue-os/akmods-zfs:coreos-stable-<N>-x86_64` | [`Containerfile`](Containerfile) `FROM ... AS akmods-zfs` | `/rpms/kmods/zfs` — `kmod-zfs` plus ZFS userspace. |
+| Input                                                  | Referenced at                                                | Provides                                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `ghcr.io/ublue-os/aurora-dx:stable`                    | [`Containerfile`](Containerfile) `AURORA_IMAGE`/`AURORA_TAG` | The base OS. Its own kernel is discarded.                                                |
+| `ghcr.io/ublue-os/akmods:coreos-stable-<N>-x86_64`     | [`Containerfile`](Containerfile) `FROM ... AS akmods`        | `/kernel-rpms` (**the kernel actually shipped**) plus common kmods (xone, v4l2loopback). |
+| `ghcr.io/ublue-os/akmods-zfs:coreos-stable-<N>-x86_64` | [`Containerfile`](Containerfile) `FROM ... AS akmods-zfs`    | `/rpms/kmods/zfs` — `kmod-zfs` plus ZFS userspace.                                       |
 
 All three are built by **`ublue-os/akmods`** (not ucore — ucore is a separate
 consumer of the same `akmods-zfs` artifacts). Both akmods tags are *floating*:

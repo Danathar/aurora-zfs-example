@@ -142,19 +142,34 @@ pick between waiting, pinning, and switching streams.
 ## Repository Layout
 
 ```text
-AGENTS.md                             agent notes: build-failure diagnosis and upstream tracing
-CLAUDE.md                             pointer to AGENTS.md
-Containerfile                         image build definition
-build_files/build.sh                  package and service customization inside the image
-build_files/kernel-akmods.sh          kernel replacement and common akmods installation
-build_files/post-check.sh             final image validation for kernel and ZFS
-build_files/zfs.sh                    ZFS RPM installation and final initramfs generation
-ci/write-badges.sh                    derives the README status badge JSON
-tests/                                plain-bash test suite for the shell above
-.github/workflows/build.yml           build and publish the container image
-.github/workflows/status-badges.yml   refresh the status badges on the `status` branch
-renovate.json                         dependency updates, including the Chunkah release tag
-docs/manual-input-check.md            Fedora release input-check notes
+AGENTS.md                                 agent notes: build-failure diagnosis and upstream tracing
+CLAUDE.md                                 pointer to AGENTS.md
+CONTRIBUTING.md                           how to work in this repo, and what CI does not prove
+Containerfile                             image build definition
+build_files/build.sh                      package and service customization inside the image
+build_files/kernel-akmods.sh              kernel replacement and common akmods installation
+build_files/post-check.sh                 final image validation for kernel and ZFS
+build_files/zfs.sh                        ZFS RPM installation and final initramfs generation
+ci/write-badges.sh                        derives the README status badge JSON
+tests/                                    plain-bash test suite for the shell above
+tests/e2e/                                manual end-to-end image build and rechunk check
+.github/workflows/build.yml               build and publish the container image
+.github/workflows/status-badges.yml       refresh the status badges on the `status` branch
+.github/workflows/coverage-gate.yml       run the suite on docs-only changes build.yml ignores
+.github/workflows/nightly-compliance.yml  re-check the published image's signature and tags
+.github/workflows/auto-qa.yml             compare CI timeouts against observed durations
+.github/workflows/labeler.yml             apply the descriptive `area/*` labels
+.github/workflows/ai-fix.yml              hand a labelled issue or a review to an agent
+.github/labeler.yml                       path-to-label map for the above
+.github/auto-qa-tuning.json               declared CI timeouts and the drift policy
+renovate.json                             dependency updates, including the Chunkah release tag
+docs/manual-input-check.md                Fedora release input-check notes
+docs/quality.md                           where the signal comes from, and what it cannot tell you
+docs/metrics.md                           what is measured here and what is not
+docs/review-rubric.md                     what a review of a change here should ask
+docs/risk-tiers.md                        how to classify a change, and the evidence each tier needs
+docs/SECURITY-AI.md                       what an agent may do here, and what it must not touch
+docs/reflections/                         durable lessons from things that went wrong
 ```
 
 ## Build And Publish

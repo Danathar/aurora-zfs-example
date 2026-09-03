@@ -1,0 +1,46 @@
+---
+name: Labeler
+
+# Applies the descriptive `area/*` labels defined in .github/labeler.yml, so a
+# pull request says at a glance which part of the repo it lands in -- and, by
+# extension, roughly which risk tier it takes (docs/risk-tiers.md).
+#
+# Two deliberate choices:
+#
+# `pull_request_target` rather than `pull_request`, which is what actions/labeler
+# documents. The job needs a write token to attach a label, and a `pull_request`
+# run from a fork gets a read-only one, so the fork case would fail rather than
+# label. `pull_request_target` runs the *base* branch's copy of this workflow and
+# its config, and this job never checks out or executes the pull request's code
+# -- it only reads the changed-file list from the API. That is what makes the
+# elevated token safe here; adding a checkout of the head ref would not be.
+#
+# `sync-labels: false` so the action only ever adds. A label a human put on by
+# hand is not removed because no path matches it any more.
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Apply area labels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Apply labels from .github/labeler.yml
+        uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: false

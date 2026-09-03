@@ -5,11 +5,11 @@ with a decision at the end, not a description of the codebase — that lives in
 [`AGENTS.md`](../../AGENTS.md), and these link to it rather than copying from
 it. One copy, one place to keep current.
 
-| Prompt | Use when |
-| --- | --- |
-| [`diagnose-build-failure.prompt.md`](diagnose-build-failure.prompt.md) | A `Build container image` run is red |
-| [`pin-akmods.prompt.md`](pin-akmods.prompt.md) | Skew is confirmed and waiting is no longer acceptable |
-| [`bump-fedora-version.prompt.md`](bump-fedora-version.prompt.md) | Fedora N+1 is out and you are considering the move |
+| Prompt                                                                 | Use when                                              |
+| ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| [`diagnose-build-failure.prompt.md`](diagnose-build-failure.prompt.md) | A `Build container image` run is red                  |
+| [`pin-akmods.prompt.md`](pin-akmods.prompt.md)                         | Skew is confirmed and waiting is no longer acceptable |
+| [`bump-fedora-version.prompt.md`](bump-fedora-version.prompt.md)       | Fedora N+1 is out and you are considering the move    |
 
 The `.prompt.md` suffix is required, not decorative: GitHub Copilot discovers
 prompt files in `.github/prompts/` by that extension, so a plain `.md` here

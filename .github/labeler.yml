@@ -1,0 +1,65 @@
+---
+# Path-based pull request labels, applied by .github/workflows/labeler.yml.
+#
+# Every label here is in an `area/` namespace, and that is a security decision
+# rather than a naming preference.
+#
+# This repository is connected to an external system ("Hive") that treats a set
+# of ordinary-looking labels as an approval to auto-merge on green CI --
+# `ci`, `testing`, `quality`, `security`, `hive/*` and `agent/*` all carry that
+# description. Two of them, `ci` and `testing`, are exactly what a path-based
+# labeler would naturally attach to a change under `.github/workflows/` or
+# `tests/`, which would hand a pull request an approval signal that no human
+# gave it.
+#
+# So this file describes *where* a change lands and nothing else. Nothing here
+# may ever mean "approved". Before adding a label to this file, check what it
+# already means to something else:
+#
+#   gh label list --json name,description
+#
+# See docs/SECURITY-AI.md, "Labels carry authority".
+#
+# Schema is actions/labeler v5+; `dot: true` is the default, so paths beginning
+# with a dot are matched without special handling.
+
+'area/build':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Containerfile'
+          - 'build_files/**'
+
+'area/ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/dependabot.yml'
+          - '.github/labeler.yml'
+          - '.github/auto-qa-tuning.json'
+          - 'ci/**'
+          - 'renovate.json'
+
+'area/docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+
+'area/tests':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+          - '.shellcheckrc'
+
+# The instruction surface an agent reads before touching anything else. Kept
+# separate from `area/docs` because a change here alters how future work is
+# done, not just what the tree says.
+'area/agents':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'AGENTS.md'
+          - 'CLAUDE.md'
+          - '.claude/**'
+          - '.cursorrules'
+          - '.github/copilot-instructions.md'
+          - '.github/prompts/**'
