@@ -1,0 +1,29 @@
+# shellcheck configuration for this repo.
+#
+# CI runs `shellcheck -x` over every *.sh via tests/test-shell-syntax.sh and
+# requires zero output — informational and style findings included. So this file
+# is the actual code-style enforcement here, not a suggestion.
+#
+# `source`d paths are resolved, matching the -x the test already passes.
+external-sources=true
+
+# Optional checks are off by default in shellcheck. The five below were each
+# measured against the whole tree first and found to produce zero findings, so
+# turning them on enforces nothing new today and catches a regression tomorrow.
+# That is the only kind of rule worth adding to a suite that must stay at zero.
+enable=quote-safe-variables
+enable=check-unassigned-uppercase
+enable=add-default-case
+enable=avoid-nullary-conditions
+enable=deprecate-which
+
+# Deliberately NOT enabled, with the finding count each would add today:
+#
+#   require-variable-braces    (23)  ${var} everywhere, including $1 and $#
+#   require-double-brackets    (11)  ci/write-badges.sh uses [ ] throughout
+#   check-extra-masked-returns (51)  flags the local x=$(...) idiom the tests
+#                                    are built on
+#
+# None of those is a defect. Enabling one means rewriting working, reviewed
+# code to satisfy a style preference, which is a separate decision from
+# "shellcheck must be clean" — make it on purpose, in its own PR, if at all.
