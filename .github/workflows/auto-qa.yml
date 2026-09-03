@@ -18,11 +18,20 @@ name: Auto-QA tuning
 # be changing a Tier 2 file unattended (docs/risk-tiers.md), and the useful
 # output here is a number a human uses when deciding, not a commit.
 #
-# Fails only on the at-risk condition -- a job whose slowest recent run has
-# grown into its timeout, which is an outage arriving on a schedule. "Timeout is
-# looser than it needs to be" is written to the summary and never fails: it is
+# Fails only on the at-risk condition, in either of its two forms: a job whose
+# slowest recent run has grown into its timeout, or a job that has already been
+# killed at it. Both are an outage arriving on a schedule. "Timeout is looser
+# than it needs to be" is written to the summary and never fails: it is
 # information, and a red workflow nobody has to act on trains people to ignore
 # red workflows.
+#
+# Those two forms need different samples, which is easy to get wrong. Duration
+# comes from *successful* runs, because a run that failed for an unrelated
+# reason says nothing about how long the work takes. But a job killed at its cap
+# is a failure, and its run is not a success -- so sampling successes alone left
+# this workflow blindest exactly when it mattered: once every current run dies
+# at the cap, the only samples left are older and faster, and it reported "ok"
+# while the build was broken. The second query exists for that case.
 
 on:
   schedule:
@@ -75,14 +84,36 @@ jobs:
           while IFS=$'\t' read -r workflow job timeout_min; do
             [ -n "${workflow}" ] || continue
 
-            # Successful runs only: a cancelled or failed run says nothing about
-            # how long the work takes when it completes.
-            run_ids=$(gh api \
+            timeout_s=$((timeout_min * 60))
+            # A job killed at its cap reports a duration a hair under it, so
+            # allow a small margin rather than testing for equality.
+            cap_s=$((timeout_s * 98 / 100))
+
+            # Two questions, two samples, because they need different runs.
+            #
+            # How long does the work take when it completes? Successful runs
+            # only -- a run that failed for an unrelated reason says nothing
+            # about duration.
+            success_ids=$(gh api \
               "repos/${REPO}/actions/workflows/${workflow}/runs?status=success&per_page=${sample}" \
               --jq '.workflow_runs[].id' 2>/dev/null || true)
 
+            # Has the work already outgrown the cap? That evidence lives only in
+            # runs the first query excludes: a job killed at `timeout-minutes` is
+            # a *failure*, and its run is not `success`. Sampling successes alone
+            # made this workflow blindest at the moment it matters -- once every
+            # current run dies at the cap, the only samples left are the older,
+            # faster ones, and it reports "ok" or "no successful runs sampled"
+            # while the build is broken on a schedule. That is the exact drift it
+            # was written to catch.
+            completed_ids=$(gh api \
+              "repos/${REPO}/actions/workflows/${workflow}/runs?status=completed&per_page=${sample}" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true)
+
             slowest=""
-            for id in ${run_ids}; do
+            timed_out=no
+
+            for id in ${success_ids}; do
               d=$(gh api "repos/${REPO}/actions/runs/${id}/jobs" 2>/dev/null \
                 | jq -r --arg job "${job}" '
                     .jobs[]?
@@ -97,15 +128,50 @@ jobs:
               done
             done
 
-            timeout_s=$((timeout_min * 60))
+            for id in ${completed_ids}; do
+              # A failed job that ran to within 2% of its cap was killed by it.
+              # The API exposes no "timed out" conclusion, so duration is the
+              # signal; an ordinary test failure returns long before the cap and
+              # does not match.
+              f=$(gh api "repos/${REPO}/actions/runs/${id}/jobs" 2>/dev/null \
+                | jq -r --arg job "${job}" '
+                    .jobs[]?
+                    | select(.name == $job and .conclusion == "failure")
+                    | select(.started_at != null and .completed_at != null)
+                    | (.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)
+                  ' || true)
+              for value in ${f}; do
+                if [ "${value}" -ge "${cap_s}" ]; then
+                  timed_out=yes
+                fi
+              done
+            done
 
-            if [ -z "${slowest}" ]; then
-              printf '| %s | %s | %sm | _no successful runs sampled_ | — |\n' \
-                "${workflow}" "${job}" "${timeout_min}" >> "${GITHUB_STEP_SUMMARY}"
+            if [ -n "${slowest}" ]; then
+              pretty="$((slowest / 60))m$((slowest % 60))s"
+            else
+              pretty="_no successful runs sampled_"
+            fi
+
+            # Checked before everything else: a job already dying at the cap is
+            # the at-risk condition in its most advanced form, and it is exactly
+            # the case where `slowest` is stale or missing.
+            if [ "${timed_out}" = "yes" ]; then
+              printf '| %s | %s | %sm | %s | %s |\n' \
+                "${workflow}" "${job}" "${timeout_min}" "${pretty}" \
+                "**at risk** — a run has already been killed at the cap" \
+                >> "${GITHUB_STEP_SUMMARY}"
+              echo "::error::${workflow} / ${job}: a run was killed at its ${timeout_min}m timeout"
+              status=1
               continue
             fi
 
-            pretty="$((slowest / 60))m$((slowest % 60))s"
+            if [ -z "${slowest}" ]; then
+              printf '| %s | %s | %sm | %s | — |\n' \
+                "${workflow}" "${job}" "${timeout_min}" "${pretty}" \
+                >> "${GITHUB_STEP_SUMMARY}"
+              continue
+            fi
 
             if awk -v d="${slowest}" -v t="${timeout_s}" -v r="${at_risk}" \
                  'BEGIN { exit !(d > t * r) }'; then

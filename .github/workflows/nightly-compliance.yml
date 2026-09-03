@@ -103,8 +103,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # A repository with no published image yet is not a compliance failure;
-      # it is a repository with nothing to check. Say so and stop.
+      # A repository that has never published an image is not a compliance
+      # failure; it is a repository with nothing to check. A repository whose
+      # image has *stopped* being readable is the opposite -- it is the headline
+      # thing this workflow exists to notice.
+      #
+      # So the exemption is narrow, and every other failure is fatal. Only
+      # "this name is not in the registry" means nothing was ever published.
+      # `manifest unknown` means the package exists and `:latest` is gone, which
+      # is precisely an image deleted out from under consumers; `unauthorized`,
+      # `denied`, a timeout or a GHCR outage mean the check could not be
+      # performed, and a check that could not be performed has not passed.
+      #
+      # Treating any inspect failure as absence -- the earlier behaviour -- made
+      # the two loudest incidents this job is for indistinguishable from a quiet
+      # green run.
       - name: Resolve the published :latest
         id: latest
         env:
@@ -114,10 +127,17 @@ jobs:
           set -euo pipefail
           if ! raw=$(skopeo inspect --creds "${REGISTRY_ACTOR}:${REGISTRY_TOKEN}" \
                        "docker://${IMAGE_REF}:latest" 2>err.txt); then
-            echo "No readable :latest at ${IMAGE_REF}:"
             cat err.txt
-            echo "present=false" >> "${GITHUB_OUTPUT}"
-            exit 0
+            if grep -qiE 'name unknown|repository name not known|name_unknown' err.txt; then
+              echo "No image has ever been published at ${IMAGE_REF}; nothing to check."
+              echo "present=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::error::${IMAGE_REF}:latest could not be inspected -- see the error above."
+            echo "This is not the 'nothing published yet' case: the registry knows this"
+            echo "name. Either :latest was deleted or repointed, or the registry or these"
+            echo "credentials are not working. Compliance is unverified either way."
+            exit 1
           fi
           digest=$(jq -r '.Digest' <<<"${raw}")
           created=$(jq -r '.Created' <<<"${raw}")
