@@ -1,0 +1,64 @@
+---
+name: Coverage gate
+
+# Closes a gap in `Build container image`, which is where the shell suite
+# normally runs.
+#
+# That workflow sets `paths-ignore` for README.md and docs/**, so a pull request
+# touching only those starts no run at all. A docs-only change was the one kind
+# of change here that nothing verified — including the docs-versus-tree checks
+# the suite is the natural home for.
+#
+# The trigger here is the exact complement of that paths-ignore, so for a given
+# change one workflow or the other runs the suite rather than both. A pull
+# request touching docs *and* code trips both and runs it twice; that costs
+# under a minute and is not worth a filter to avoid.
+#
+# The coverage assertion itself lives in tests/test-coverage.sh, so it runs
+# locally too. This workflow is where it is enforced, not where it is defined.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - '**/README.md'
+      - 'docs/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: Shell tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # tests/test-shell-syntax.sh skips its shellcheck pass when the tool is
+      # absent, which keeps the suite usable on a developer machine. CI is where
+      # that pass has to be enforced rather than skipped, so install it.
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      - name: Run shell test suite
+        run: ./tests/run-tests.sh

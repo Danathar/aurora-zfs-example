@@ -149,8 +149,11 @@ build_files/build.sh                  package and service customization inside t
 build_files/kernel-akmods.sh          kernel replacement and common akmods installation
 build_files/post-check.sh             final image validation for kernel and ZFS
 build_files/zfs.sh                    ZFS RPM installation and final initramfs generation
+ci/write-badges.sh                    derives the README status badge JSON
+tests/                                plain-bash test suite for the shell above
 .github/workflows/build.yml           build and publish the container image
-.github/renovate.json5                dependency and pinned Chunkah release updates
+.github/workflows/status-badges.yml   refresh the status badges on the `status` branch
+renovate.json                         dependency updates, including the Chunkah release tag
 docs/manual-input-check.md            Fedora release input-check notes
 ```
 
@@ -176,10 +179,26 @@ Aurora content and this image's replacement kernel and ZFS files. This improves
 layer reuse and update resumability; it does not change the files installed in
 the image.
 
-The workflow uses an explicit stable Chunkah version and immutable image digest,
-for example `v0.6.0@sha256:...`, instead of the floating `latest` tag. Renovate's
-custom manager in `.github/renovate.json5` tracks newer stable `vX.Y.Z` releases
-and updates the version and digest together.
+The workflow pins Chunkah to an explicit stable release tag, for example
+`quay.io/coreos/chunkah:v0.6.0`, instead of the floating `latest` tag. A custom
+manager in [`renovate.json`](renovate.json) matches that `CHUNKAH_IMAGE:` line
+and opens a PR when a newer stable `vX.Y.Z` is published.
+
+The pin is the semver tag only — there is no `@sha256:...` digest on it, and
+`renovate.json` explicitly disables digest and pin updates for
+`quay.io/coreos/chunkah`. So the guarantee here is "a named upstream release",
+not "these exact bytes": Chunkah could in principle re-push `v0.6.0`.
+
+Nothing downstream re-checks the result, either. `build_files/post-check.sh` and
+`bootc container lint` run *inside* the `Containerfile`, so they validate the
+image before the workflow hands it to Chunkah. The re-layered archive that comes
+back out is loaded, tagged, pushed and signed without either check running
+again, and `Verify pushed tags share one digest` confirms that every tag
+resolves to one manifest — not that the manifest holds what was built.
+
+Do not read this pin as digest-level immutability. If that property is wanted,
+it needs a digest on `CHUNKAH_IMAGE` and a `currentDigest` group in the custom
+manager, not an inference from the checks above.
 
 Scheduled builds run weekly on Sunday morning at 05:00 UTC, which is about
 1:00 AM Eastern during daylight time. This keeps the image refreshed before a

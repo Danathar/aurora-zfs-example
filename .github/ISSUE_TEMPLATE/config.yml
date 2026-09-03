@@ -1,0 +1,16 @@
+---
+blank_issues_enabled: true
+contact_links:
+  - name: Kernel / ZFS akmod skew — read this first
+    url: https://github.com/Danathar/aurora-zfs-simple/blob/main/AGENTS.md#dominant-failure-mode-kernel--zfs-akmod-skew
+    about: >-
+      A red build is usually upstream skew, not a bug here. The OpenZFS/kernel
+      badge in the README says so without opening a log.
+  - name: Upstream akmods issues (ublue-os/akmods)
+    url: https://github.com/ublue-os/akmods/issues
+    about: >-
+      Where a frozen akmods-zfs tag is actually tracked. This repo only
+      assembles those artifacts; it does not build ZFS.
+  - name: Aurora ZFS discussion
+    url: https://github.com/ublue-os/aurora/issues/1765
+    about: Background on why Aurora dropped ZFS and what this image is for.

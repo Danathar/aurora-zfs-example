@@ -1,0 +1,52 @@
+# Cursor rules for aurora-zfs-simple
+
+Read AGENTS.md first — it is the maintained orientation document for this repo.
+These rules are the short form and deliberately do not restate it, so there is
+only one copy to keep current.
+
+## Context
+
+A thin Aurora DX derivative that adds ZFS back. It does not compile ZFS; it
+assembles three prebuilt Universal Blue artifacts: the Aurora base, akmods and
+akmods-zfs.
+
+Correctness depends on TWO of them agreeing about the kernel version: akmods and
+akmods-zfs. The Aurora base is not one of them. kernel-akmods.sh erases Aurora's
+kernel outright, so this image legitimately runs a newer kernel than Aurora
+stable whenever the akmods stream is ahead. That is the design. Never recommend
+a downgrade or a pin because the base image's kernel differs.
+
+## Before changing anything in response to a failing build
+
+Most red builds here are caused upstream, not by this repo. akmods tracks
+whatever kernel Fedora ships; akmods-zfs can only advance when OpenZFS supports
+that kernel. Compare the ostree.linux label on ghcr.io/ublue-os/akmods and
+ghcr.io/ublue-os/akmods-zfs for the release the Containerfile targets — those
+two labels, and nothing else, decide it. If they differ, that is the diagnosis;
+see AGENTS.md for the commands and the options.
+
+Never loosen the kmod-zfs glob in build_files/zfs.sh or make that install
+non-fatal to get past it. A kmod built for a different kernel will not load, and
+the failure moves from the build to the boot.
+
+## Code
+
+- Shell only. No package manager, no node_modules, no build step. Do not add one.
+- shellcheck -x must produce zero output, informational findings included.
+- Shebang and executable bit on every *.sh; the Containerfile and the workflows
+  run them by path.
+- Four-space indent, except ci/write-badges.sh, which is two.
+- Run ./tests/run-tests.sh with shellcheck installed; the suite skips that pass
+  when it is missing, so a local green is weaker than CI's.
+
+## Comments
+
+Comments here explain why, especially why something that looks wrong is
+deliberate. Several encode a specific past incident. Do not strip or "tidy"
+them; write in the same register.
+
+## Testing reality
+
+build_files/*.sh and the Containerfile only execute inside an image build.
+Nothing on the host reaches them, so a green suite is not evidence for a change
+to either. State how it was verified, or that it was not.

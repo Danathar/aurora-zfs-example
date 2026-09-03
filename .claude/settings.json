@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(./tests/run-tests.sh)",
+      "Bash(./tests/run-tests.sh:*)",
+      "Bash(shellcheck:*)",
+      "Bash(bash -n:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(skopeo inspect:*)"
+    ],
+    "ask": [
+      "Bash(gh api:*)",
+      "Bash(podman build:*)",
+      "Bash(podman rmi:*)",
+      "Bash(podman run:*)",
+      "Bash(gh workflow run:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Read(./cosign.key)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(podman image prune:*)",
+      "Bash(podman system prune:*)",
+      "Bash(podman rmi -a:*)",
+      "Bash(podman rmi --all:*)",
+      "Bash(buildah rmi --all:*)",
+      "Bash(buildah rm --all:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(cosign sign:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // empty\"); case \"$f\" in *.sh) command -v shellcheck >/dev/null 2>&1 || exit 0; out=$(cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || exit 0; shellcheck -x \"$f\" 2>&1) || { printf \"%s\\n\" \"$out\" >&2; exit 2; };; esac; exit 0"
+          }
+        ]
+      }
+    ]
+  },
+  "_note_gh_api": "gh api is intentionally in `ask`, never `allow`. Permission rules match by command prefix, and `gh api` switches to POST as soon as -f/-F is present and honours -X for any method. An allow rule such as Bash(gh api repos/:*) would therefore approve mutations, including the workflow-dispatch endpoint that `gh workflow run` is listed under `ask` to gate."
+}
