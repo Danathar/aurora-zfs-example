@@ -6,9 +6,9 @@
 # would otherwise only surface halfway through a 40-minute image build, or on
 # the daily badge run where nobody is watching.
 #
-# shellcheck is run when installed and skipped otherwise, so the suite stays
-# usable on a machine without it. Making shellcheck a hard requirement belongs
-# in CI, not here.
+# The shellcheck pass runs when the tool is installed and is skipped otherwise,
+# so the suite stays usable on a machine without it. Making it a hard
+# requirement belongs in CI, not here.
 
 set -uo pipefail
 

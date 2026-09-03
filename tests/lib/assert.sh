@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+#
 # Assertion helpers shared by the tests/test-*.sh files.
 #
 # Sourced, never executed. Each assertion increments a counter and prints one
