@@ -10,11 +10,11 @@ misread.
 
 ## The badges
 
-| Badge | Source | Answers |
-| --- | --- | --- |
-| **build** | Actions status for `build.yml` on `main` | Did the last run pass? |
-| **last good build** | `Created` timestamp on the published `:latest` image | Is there a usable image, and how old is it? |
-| **OpenZFS/kernel** | `ostree.linux` labels on the two akmods images the `Containerfile` pulls | If the build is red, *why*? |
+| Badge               | Source                                                                   | Answers                                     |
+| ------------------- | ------------------------------------------------------------------------ | ------------------------------------------- |
+| **build**           | Actions status for `build.yml` on `main`                                 | Did the last run pass?                      |
+| **last good build** | `Created` timestamp on the published `:latest` image                     | Is there a usable image, and how old is it? |
+| **OpenZFS/kernel**  | `ostree.linux` labels on the two akmods images the `Containerfile` pulls | If the build is red, *why*?                 |
 
 Read them together. A red **build** with a recent **last good build** and a
 `blocked` **OpenZFS/kernel** is the normal, expected state during upstream skew:
@@ -36,13 +36,13 @@ Two properties of the badge pipeline are deliberate and worth knowing:
 
 ## The gates
 
-| Gate | Runs on | Blocks |
-| --- | --- | --- |
-| `Shell tests` job in `build.yml` | every PR and push, minus `paths-ignore` | `build_push`, via `needs: tests` |
-| The image build itself | same | publishing — a failed build pushes nothing |
-| `post-check.sh` | inside the build, as a `RUN` step | the build |
-| `bootc container lint` | inside the build, as a `RUN` step | the build |
-| `Verify pushed tags share one digest` | default-branch non-PR runs | signing |
+| Gate                                  | Runs on                                 | Blocks                                     |
+| ------------------------------------- | --------------------------------------- | ------------------------------------------ |
+| `Shell tests` job in `build.yml`      | every PR and push, minus `paths-ignore` | `build_push`, via `needs: tests`           |
+| The image build itself                | same                                    | publishing — a failed build pushes nothing |
+| `post-check.sh`                       | inside the build, as a `RUN` step       | the build                                  |
+| `bootc container lint`                | inside the build, as a `RUN` step       | the build                                  |
+| `Verify pushed tags share one digest` | default-branch non-PR runs              | signing                                    |
 
 ### What each one does not cover
 

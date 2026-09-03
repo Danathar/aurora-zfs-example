@@ -9,12 +9,12 @@ radius**: who or what is damaged if the change is wrong, and how it is noticed.
 
 ## The tiers
 
-| Tier | Blast radius | Paths | Merge on green CI alone? |
-| --- | --- | --- | --- |
-| **3 — Published artifact** | A wrong change ships signed bytes, or a host that will not boot | `Containerfile`, `build_files/**`, the push/verify/sign steps of `.github/workflows/build.yml`, `cosign.pub` | **No.** Needs a human and stated evidence. |
-| **2 — Pipeline** | A wrong change breaks or silently degrades the build, badges, or dependency pins | other parts of `.github/workflows/**`, `ci/**`, `renovate.json`, `.github/dependabot.yml` | No. Needs a human, but CI is meaningful evidence. |
-| **1 — Load-bearing prose** | A wrong change misleads a human or an agent mid-incident | `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/**`, `.github/prompts/**`, `.claude/**` | Yes, if the doc-path suite is green and a human has read it. |
-| **0 — Self-checking** | A wrong change fails in front of the person who made it | `tests/**`, `.editorconfig`, `.shellcheckrc`, `.gitignore` | Yes. |
+| Tier                       | Blast radius                                                                     | Paths                                                                                                        | Merge on green CI alone?                                     |
+| -------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| **3 — Published artifact** | A wrong change ships signed bytes, or a host that will not boot                  | `Containerfile`, `build_files/**`, the push/verify/sign steps of `.github/workflows/build.yml`, `cosign.pub` | **No.** Needs a human and stated evidence.                   |
+| **2 — Pipeline**           | A wrong change breaks or silently degrades the build, badges, or dependency pins | other parts of `.github/workflows/**`, `ci/**`, `renovate.json`, `.github/dependabot.yml`                    | No. Needs a human, but CI is meaningful evidence.            |
+| **1 — Load-bearing prose** | A wrong change misleads a human or an agent mid-incident                         | `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/**`, `.github/prompts/**`, `.claude/**`                   | Yes, if the doc-path suite is green and a human has read it. |
+| **0 — Self-checking**      | A wrong change fails in front of the person who made it                          | `tests/**`, `.editorconfig`, `.shellcheckrc`, `.gitignore`                                                   | Yes.                                                         |
 
 When a change spans tiers, **it takes the highest tier it touches.** A pull
 request that edits `tests/` and one line of `build_files/` is Tier 3.

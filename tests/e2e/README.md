@@ -46,14 +46,14 @@ which is the moment that risk is real.
 
 ## What it checks
 
-| Check | Notes |
-| --- | --- |
-| The build completes | Implies the in-build `post-check.sh` and `bootc container lint` passed |
-| `post-check.sh` against the final image | The whole point under `--rechunk` |
+| Check                                          | Notes                                                                                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| The build completes                            | Implies the in-build `post-check.sh` and `bootc container lint` passed                                                 |
+| `post-check.sh` against the final image        | The whole point under `--rechunk`                                                                                      |
 | `bootc container lint` against the final image | The other half — a re-layering can disturb a bootc filesystem invariant while leaving every kernel and ZFS file intact |
-| Exactly one kernel module tree | |
-| `zpool` and `zfs` on `PATH` | ZFS userspace survived |
-| `containers.bootc=1` label | Informational — the workflow sets this, a local build does not |
+| Exactly one kernel module tree                 |                                                                                                                        |
+| `zpool` and `zfs` on `PATH`                    | ZFS userspace survived                                                                                                 |
+| `containers.bootc=1` label                     | Informational — the workflow sets this, a local build does not                                                         |
 
 ## Storage
 

@@ -8,10 +8,10 @@ session, human or agent, starts with them instead of rediscovering them.
 [`AGENTS.md`](../../AGENTS.md#incident-log) already has an **incident log**, and
 this does not replace or duplicate it. They answer different questions:
 
-| | Answers | Example |
-| --- | --- | --- |
+|                          | Answers                                                              | Example                                                                     |
+| ------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `AGENTS.md` incident log | *What is upstream doing to us right now, and what do I do about it?* | Fedora kernel 7.1 vs OpenZFS 2.4.3 skew, and whether to wait, pin or switch |
-| This directory | *What did we learn about how to build and operate this repo?* | Never pipe large JSON through the process environment |
+| This directory           | *What did we learn about how to build and operate this repo?*        | Never pipe large JSON through the process environment                       |
 
 The incident log is a **diagnostic reference** consulted mid-incident, and it
 tracks upstream events this repo does not control. These entries are
