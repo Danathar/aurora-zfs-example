@@ -58,10 +58,11 @@ signature until they update.
 
 ### Secret inventory
 
-| Secret           | Used by                                    | If it leaks                                                                                              |
-| ---------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `SIGNING_SECRET` | `Sign container image` step in `build.yml` | Anyone can sign an image that verifies against the committed `cosign.pub`. Highest severity in the repo. |
-| `GITHUB_TOKEN`   | every workflow, scoped per job             | Scoped and short-lived; damage is bounded by the `permissions:` block of the job that held it.           |
+| Secret                                          | Used by                                     | If it leaks                                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SIGNING_SECRET`                                | `Sign container image` step in `build.yml`  | Anyone can sign an image that verifies against the committed `cosign.pub`. Highest severity in the repo.                                                     |
+| `GITHUB_TOKEN`                                  | every workflow, scoped per job              | Scoped and short-lived; damage is bounded by the `permissions:` block of the job that held it.                                                               |
+| `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` | `.github/workflows/ai-fix.yml`, if ever set | Billing, not repository access — it buys model calls and cannot itself write here. **Neither is set as of this writing**; the workflow is inert without one. |
 
 Nothing else in CI is secret. The registry push uses the run's own
 `github.token`, not a stored credential.
@@ -152,11 +153,38 @@ a human's plus two:
 2. **It never self-approves.** An agent must not apply an approval label from
    the list above, approve a review, or enable auto-merge.
 
-If a workflow is ever added that lets an agent open pull requests from a label
-or comment, it must: run only from the default branch's committed workflow file,
-hold no more permission than opening a branch and a pull request requires, be
-inert when its credentials are absent rather than failing loudly, and never
-touch `main` directly.
+A workflow that lets an agent open pull requests from a label or comment must:
+run only from the default branch's committed workflow file, hold no more
+permission than opening a branch and a pull request requires, be inert when its
+credentials are absent rather than failing loudly, and never touch `main`
+directly.
+
+[`.github/workflows/ai-fix.yml`](../.github/workflows/ai-fix.yml) is that
+workflow. Label an issue `ai-fix-requested`, or say `@claude` in a comment or a
+review thread, and it opens a pull request from an `ai-fix/*` branch. How it
+meets each condition, and the two points worth knowing:
+
+- Its triggers — `issues`, `issue_comment`, `pull_request_review` and
+  `pull_request_review_comment` — always run the default branch's copy of the
+  file, so a pull request cannot edit the workflow that acts on it.
+- **A bot cannot start it.** `allowed_bots` is empty and only a user with write
+  access can trigger it. `chatgpt-codex-connector[bot]` posting a finding does
+  nothing on its own; a maintainer who has read the finding and agrees with it
+  relays it. That relay is the trust boundary, and it is what keeps the
+  untrusted-input rule above intact while a review is being applied.
+- **It holds `contents: write`**, which the list above says needs a human
+  decision. It got one: the repository owner granted it explicitly on
+  2026-09-03, on the pull request that added this workflow. That is the minimum
+  for pushing a branch, and it comes with neither `packages: write` nor access
+  to `SIGNING_SECRET` — and the publishing steps in `build.yml` are gated on
+  `github.event_name != 'pull_request'` *and* the default branch, so a pull
+  request it opens cannot publish or sign what it contains. That gate is what
+  bounds the grant.
+- No agent credential is set on this repository as of this writing, so every
+  trigger currently stops at the workflow's `preflight` job, records why in the
+  run summary, and succeeds.
+- Fork pull requests are skipped rather than half-attempted: the head branch is
+  in another repository and this job's token cannot push there.
 
 ## What this policy does not cover
 

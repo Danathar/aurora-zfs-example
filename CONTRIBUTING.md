@@ -129,6 +129,14 @@ Verify each finding before acting — it is often right, not automatically right
 Fix what is valid; push back with evidence on what is not. Do not block on it:
 give it a couple of minutes and move on if nothing appears.
 
+To hand a verified finding to an agent instead of fixing it yourself, reply
+`@claude` on the review thread, or label an issue `ai-fix-requested`. That runs
+[`.github/workflows/ai-fix.yml`](.github/workflows/ai-fix.yml), which opens a
+pull request and never merges one. The bot's own comment cannot start it — your
+reply is what does, deliberately, because you have verified the finding and the
+bot has not. See
+[`docs/SECURITY-AI.md`](docs/SECURITY-AI.md#agent-authored-pull-requests).
+
 ## Changes that need a conversation first
 
 Open an issue before:

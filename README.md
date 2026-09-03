@@ -159,6 +159,7 @@ tests/e2e/                                manual end-to-end image build and rech
 .github/workflows/nightly-compliance.yml  re-check the published image's signature and tags
 .github/workflows/auto-qa.yml             compare CI timeouts against observed durations
 .github/workflows/labeler.yml             apply the descriptive `area/*` labels
+.github/workflows/ai-fix.yml              hand a labelled issue or a review to an agent
 .github/labeler.yml                       path-to-label map for the above
 .github/auto-qa-tuning.json               declared CI timeouts and the drift policy
 renovate.json                             dependency updates, including the Chunkah release tag
