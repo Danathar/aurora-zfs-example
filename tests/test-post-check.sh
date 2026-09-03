@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+#
+# Tests for the pure helpers in build_files/post-check.sh.
+#
+# post-check.sh runs inside the image build against a real RPM database, module
+# tree and initramfs, so its check_* functions are not reachable from a test on
+# the host. Its helpers are: they take strings, shell out to one tool, and
+# decide. Now that the file guards its entry point, sourcing it defines those
+# helpers without running a single check, so each one can be called directly
+# with a stub standing in for rpm, ldd or find.
+#
+# Each case sources the script in a fresh bash and calls one helper, because
+# `fail` exits rather than returning -- a helper's verdict *is* the exit status
+# of the process, and that is what these assertions read.
+#
+# The property most worth pinning down is verify_rpm_payload's nine-character
+# flag window. rpm -V output puts the verification flags in columns 1-9 and the
+# path after them, so a payload-change letter is only meaningful in that window
+# -- an S, D, 5, L or P in a *filename* must not fail the build.
+
+set -uo pipefail
+
+TEST_NAME="test-post-check"
+TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
+SCRIPT="${REPO_ROOT}/build_files/post-check.sh"
+
+# shellcheck source=tests/lib/assert.sh
+source "${TEST_DIR}/lib/assert.sh"
+
+WORK_ROOT="$(mktemp -d)"
+trap 'rm -rf "${WORK_ROOT}"' EXIT
+
+case_dir=""
+STATUS=0
+OUTPUT=""
+
+# Fresh sandbox per case: its own stub bin directory and canned responses, so
+# no case can observe another's leftovers.
+new_case() {
+    case_dir="${WORK_ROOT}/$1"
+    mkdir -p "${case_dir}/bin"
+}
+
+# Install a stub for a command that prints whatever `canned` registered and
+# exits with whatever `exits` registered (0 by default), ignoring its
+# arguments. Each case drives one helper, which makes one kind of call, so
+# argument dispatch would only add a way for the stub to be wrong.
+stub_command() {
+    local name=$1
+    : >"${case_dir}/${name}.out"
+    printf '0\n' >"${case_dir}/${name}.status"
+    cat >"${case_dir}/bin/${name}" <<'STUB'
+#!/usr/bin/env bash
+dir="$(dirname "$0")/.."
+name="$(basename "$0")"
+cat "${dir}/${name}.out"
+exit "$(cat "${dir}/${name}.status")"
+STUB
+    chmod +x "${case_dir}/bin/${name}"
+}
+
+canned() { cat >"${case_dir}/$1.out"; }
+exits() { printf '%s\n' "$2" >"${case_dir}/$1.status"; }
+
+# Source post-check.sh and call one helper. $0 is deliberately not the script's
+# path, which is exactly the condition the entry-point guard tests for.
+run_helper() {
+    OUTPUT="$(
+        PATH="${case_dir}/bin:${PATH}" bash -c '
+            source "$1"
+            shift
+            "$@"
+        ' test-post-check "${SCRIPT}" "$@" 2>&1
+    )"
+    STATUS=$?
+}
+
+# ---------------------------------------------------------------------------
+# The entry-point guard, in both directions
+# ---------------------------------------------------------------------------
+
+new_case guard-sourcing-runs-no-checks
+run_helper log "sourced ok"
+assert_eq "sourcing post-check.sh succeeds" 0 "${STATUS}"
+assert_eq "sourcing defines the helpers and runs no check" \
+    "post-check: sourced ok" "${OUTPUT}"
+
+new_case guard-executing-still-runs-main
+# Two kernel module directories make check_kernel_tree, the first thing main
+# does, fail immediately -- so this proves main ran without letting any later
+# check touch the host (check_zfs_modules would run `depmod -a`).
+stub_command find
+canned find <<'EOF'
+/usr/lib/modules/6.1.0-1.fc44.x86_64
+/usr/lib/modules/6.2.0-1.fc44.x86_64
+EOF
+OUTPUT="$(PATH="${case_dir}/bin:${PATH}" bash "${SCRIPT}" 2>&1)"
+STATUS=$?
+assert_eq "executing the script still runs main" 1 "${STATUS}"
+assert_contains "main starts at the kernel tree check" \
+    "${OUTPUT}" "post-check: checking kernel module tree"
+assert_contains "and stops on the first failure" \
+    "${OUTPUT}" "expected exactly one kernel module directory, found 2"
+
+# ---------------------------------------------------------------------------
+# require_glob: the compressed-module case it exists for
+# ---------------------------------------------------------------------------
+
+new_case require-glob-uncompressed
+mkdir -p "${case_dir}/extra"
+: >"${case_dir}/extra/zfs.ko"
+run_helper require_glob "zfs kernel module" "${case_dir}/extra/zfs.ko*"
+assert_eq "an uncompressed .ko satisfies the glob" 0 "${STATUS}"
+
+new_case require-glob-xz
+mkdir -p "${case_dir}/extra"
+: >"${case_dir}/extra/zfs.ko.xz"
+run_helper require_glob "zfs kernel module" "${case_dir}/extra/zfs.ko*"
+assert_eq "an xz-compressed module satisfies the same glob" 0 "${STATUS}"
+
+new_case require-glob-zst
+mkdir -p "${case_dir}/extra"
+: >"${case_dir}/extra/zfs.ko.zst"
+run_helper require_glob "zfs kernel module" "${case_dir}/extra/zfs.ko*"
+assert_eq "a zstd-compressed module satisfies the same glob" 0 "${STATUS}"
+
+new_case require-glob-missing
+mkdir -p "${case_dir}/extra"
+: >"${case_dir}/extra/zfs.ko"
+run_helper require_glob "spl kernel module" "${case_dir}/extra/spl.ko*"
+assert_eq "no match is a hard failure" 1 "${STATUS}"
+assert_contains "the failure names the description and the pattern" \
+    "${OUTPUT}" "required spl kernel module not found matching: ${case_dir}/extra/spl.ko*"
+
+new_case require-glob-directory-is-not-a-match
+# compgen -G matches directories too; the patterns in use end in .ko* so this
+# only documents the behaviour rather than asserting a guard that is not there.
+mkdir -p "${case_dir}/extra/zfs.ko.d"
+run_helper require_glob "zfs kernel module" "${case_dir}/extra/zfs.ko*"
+assert_eq "a matching directory counts as a match" 0 "${STATUS}"
+
+# ---------------------------------------------------------------------------
+# verify_rpm_payload: rpm -V flag parsing
+# ---------------------------------------------------------------------------
+
+new_case payload-clean
+stub_command rpm
+canned rpm </dev/null
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "no rpm -V output is a clean payload" 0 "${STATUS}"
+
+new_case payload-metadata-only
+stub_command rpm
+exits rpm 1 # rpm -V exits non-zero whenever it reports anything
+canned rpm <<'EOF'
+.....UGT.    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+.....UG..    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/spl.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "user/group/time drift alone is accepted in a bootc image" 0 "${STATUS}"
+
+new_case payload-letters-in-the-filename-only
+# The whole point of reading only columns 1-9: this path contains S, D, 5, L
+# and P, and the flag window is all dots. Comparing against the whole line
+# would fail a perfectly good image.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+.........    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/SPL-D5-LP.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "flag letters appearing in the path do not fail the check" 0 "${STATUS}"
+
+new_case payload-digest-changed
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+.....UGT.    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/spl.ko.xz
+..5....T.    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a changed digest fails even when other lines are benign" 1 "${STATUS}"
+assert_contains "the failure says the payload changed" \
+    "${OUTPUT}" "RPM verification found payload changes for kmod-zfs"
+assert_contains "and prints the full rpm -V output for diagnosis" \
+    "${OUTPUT}" "spl.ko.xz"
+
+new_case payload-size-changed
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+S.5....T.  c /etc/zfs/zed.d/zed.rc
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a size change fails" 1 "${STATUS}"
+assert_contains "reported as a payload change" \
+    "${OUTPUT}" "RPM verification found payload changes for kmod-zfs"
+
+new_case payload-missing-file
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+missing     /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a missing file fails" 1 "${STATUS}"
+assert_contains "missing files are reported separately from payload changes" \
+    "${OUTPUT}" "RPM verification found missing files for kmod-zfs"
+
+new_case payload-missing-reported-before-flags
+# A missing line has no flag window at all: "missing " is only 8 characters, so
+# the missing check must come first or the line would be judged on garbage.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+missing   c /etc/zfs/zed.d/zed.rc
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_contains "a missing line is classified as missing, not as a payload change" \
+    "${OUTPUT}" "RPM verification found missing files for kmod-zfs"
+
+# ---------------------------------------------------------------------------
+# require_single_rpm_version: the split-stack failure it exists to catch
+# ---------------------------------------------------------------------------
+
+new_case single-version-agreeing
+stub_command rpm
+canned rpm <<'EOF'
+2.3.4-1.fc44
+2.3.4-1.fc44
+2.3.4-1.fc44
+EOF
+run_helper require_single_rpm_version "ZFS" kmod-zfs zfs python3-pyzfs
+assert_eq "one VERSION-RELEASE across the stack passes" 0 "${STATUS}"
+
+new_case single-version-split-stack
+stub_command rpm
+canned rpm <<'EOF'
+2.3.4-1.fc44
+2.3.3-1.fc44
+EOF
+run_helper require_single_rpm_version "ZFS" kmod-zfs zfs
+assert_eq "kmod-zfs from one release and zfs from another fails" 1 "${STATUS}"
+assert_contains "the failure names the group" \
+    "${OUTPUT}" "expected exactly one ZFS version"
+assert_contains "and prints the older version it found" "${OUTPUT}" "2.3.3-1.fc44"
+assert_contains "and the newer one" "${OUTPUT}" "2.3.4-1.fc44"
+
+new_case single-version-nothing-installed
+# rpm printing nothing must not read as "one version, therefore fine".
+stub_command rpm
+canned rpm </dev/null
+run_helper require_single_rpm_version "ZFS" kmod-zfs
+assert_eq "no versions at all is a failure, not a pass" 1 "${STATUS}"
+
+# ---------------------------------------------------------------------------
+# The remaining require_* helpers
+# ---------------------------------------------------------------------------
+
+new_case require-rpm
+stub_command rpm
+run_helper require_rpm zfs
+assert_eq "an installed package passes" 0 "${STATUS}"
+
+new_case require-rpm-absent
+stub_command rpm
+exits rpm 1
+run_helper require_rpm zfs
+assert_eq "an absent package fails" 1 "${STATUS}"
+assert_contains "the failure names the package" \
+    "${OUTPUT}" "required RPM is not installed: zfs"
+
+new_case require-rpm-glob
+stub_command rpm
+canned rpm <<'EOF'
+libzfs6-2.3.4-1.fc44.x86_64
+EOF
+run_helper require_rpm_glob "libzfs" "libzfs*"
+assert_eq "an ABI-numbered package matches the name glob" 0 "${STATUS}"
+
+new_case require-rpm-glob-empty
+stub_command rpm
+canned rpm </dev/null
+run_helper require_rpm_glob "libzfs" "libzfs*"
+assert_eq "no match fails" 1 "${STATUS}"
+assert_contains "the failure names the description and the glob" \
+    "${OUTPUT}" "required RPM not installed for libzfs: libzfs*"
+
+new_case require-command-missing
+run_helper require_command definitely-not-a-real-command
+assert_eq "a missing command fails" 1 "${STATUS}"
+assert_contains "the failure names the command" \
+    "${OUTPUT}" "required command not found: definitely-not-a-real-command"
+
+new_case require-file
+: >"${case_dir}/present"
+run_helper require_file "${case_dir}/present"
+assert_eq "an existing path passes" 0 "${STATUS}"
+run_helper require_file "${case_dir}/absent"
+assert_eq "a missing path fails" 1 "${STATUS}"
+assert_contains "the failure names the path" \
+    "${OUTPUT}" "required file not found: ${case_dir}/absent"
+
+new_case require-ldd-resolved
+: >"${case_dir}/zpool"
+stub_command ldd
+canned ldd <<'EOF'
+	libzfs.so.6 => /usr/lib64/libzfs.so.6 (0x00007f0000000000)
+	libc.so.6 => /usr/lib64/libc.so.6 (0x00007f0000100000)
+EOF
+run_helper require_ldd_resolved "${case_dir}/zpool"
+assert_eq "a fully resolved binary passes" 0 "${STATUS}"
+
+new_case require-ldd-unresolved
+: >"${case_dir}/zpool"
+stub_command ldd
+canned ldd <<'EOF'
+	libzfs.so.6 => not found
+	libc.so.6 => /usr/lib64/libc.so.6 (0x00007f0000100000)
+EOF
+run_helper require_ldd_resolved "${case_dir}/zpool"
+assert_eq "a missing shared library fails" 1 "${STATUS}"
+assert_contains "the failure names the binary" \
+    "${OUTPUT}" "unresolved shared library dependency for ${case_dir}/zpool"
+assert_contains "and prints the ldd output" "${OUTPUT}" "libzfs.so.6 => not found"
+
+new_case require-ldd-missing-binary
+stub_command ldd
+run_helper require_ldd_resolved "${case_dir}/absent"
+assert_eq "a binary that is not there fails before ldd runs" 1 "${STATUS}"
+assert_contains "reported as a missing file, not as a link error" \
+    "${OUTPUT}" "required file not found: ${case_dir}/absent"
+
+finish

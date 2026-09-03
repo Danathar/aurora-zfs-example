@@ -27,8 +27,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Runs on every pull request, which is the point: ci/write-badges.sh is
+  # executed by no other trigger here. The `Status badges` workflow runs it on
+  # a schedule and on workflow_run completion, and explicitly skips
+  # pull_request, so before this job a change to that script reached main
+  # having never run once, and first executed unattended at 06:30 UTC.
+  tests:
+    name: Shell tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # tests/test-shell-syntax.sh skips its shellcheck pass when the tool is
+      # absent, which keeps the suite usable on a developer machine. CI is
+      # where that pass has to be enforced rather than skipped, so install it.
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      - name: Run shell test suite
+        run: ./tests/run-tests.sh
+
   build_push:
     name: Build and push image
+    needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
