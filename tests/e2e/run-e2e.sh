@@ -35,6 +35,10 @@
 #   ./tests/e2e/run-e2e.sh --rechunk       # build, rechunk, verify the rechunked image
 #   ./tests/e2e/run-e2e.sh --clean         # also remove the images it made
 #   ./tests/e2e/run-e2e.sh --keep-going    # report every failed check, not just the first
+#
+# E2E_ARCHIVE_DIR overrides where the --rechunk archive is written. It defaults
+# to podman's storage filesystem rather than TMPDIR, because /tmp is tmpfs on a
+# typical Fedora/Aurora host and the archive is measured in gigabytes.
 
 set -euo pipefail
 
@@ -70,6 +74,7 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 BUILD_TAG="localhost/aurora-zfs-simple-e2e:${STAMP}"
 CHUNKED_TAG="localhost/aurora-zfs-simple-e2e:${STAMP}-chunked"
 CREATED_TAGS=()
+ARCHIVE=""
 
 FAILURES=0
 CHECKS=0
@@ -97,6 +102,16 @@ fail() {
 step() { printf '\n==> %s\n' "$1"; }
 
 cleanup() {
+    # The archive is this script's own temp file and can be several GB. It goes
+    # unconditionally, --clean or not: `set -e` aborts the moment chunkah or
+    # `podman load` fails, and stranding it in TMPDIR would compound the
+    # disk-space exhaustion that is the most likely reason they failed.
+    if [[ -n "${ARCHIVE}" && -e "${ARCHIVE}" ]]; then
+        printf '\n==> Removing temporary archive %s\n' "${ARCHIVE}"
+        rm -f "${ARCHIVE}"
+    fi
+
+    # Images are only removed when asked, and only the exact tags this run made.
     [[ "${CLEAN}" -eq 1 ]] || return 0
     [[ "${#CREATED_TAGS[@]}" -gt 0 ]] || return 0
     step "Removing only the images this run created"
@@ -118,14 +133,54 @@ if ! command -v podman >/dev/null 2>&1; then
 fi
 printf '  podman %s\n' "$(podman --version | awk '{print $3}')"
 
-avail_kb="$(df -Pk "${REPO_ROOT}" | awk 'NR==2 {print $4}')"
-if [[ "${avail_kb}" -lt 41943040 ]]; then
-    printf 'run-e2e: want at least 40G free near %s, found %sG\n' \
-        "${REPO_ROOT}" "$((avail_kb / 1048576))" >&2
-    printf 'run-e2e: the base image, akmods layers and the built image do not fit\n' >&2
+# The checkout is not where the bytes land. The image goes into podman's graph
+# root and, under --rechunk, the archive goes to TMPDIR. Those are routinely on
+# different filesystems from the repo, so checking only the repo would let this
+# pass its own up-front check and then die tens of minutes later with a full
+# disk. Check each distinct filesystem that actually receives data.
+graph_root="$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null || true)"
+[[ -n "${graph_root}" ]] || graph_root="${HOME}/.local/share/containers/storage"
+
+# TMPDIR is the wrong default for a multi-gigabyte archive: on this repo's
+# usual hosts /tmp is tmpfs, so the archive would be written to RAM and the
+# rechunk would die on a machine with hundreds of free gigabytes. Default it
+# beside podman's storage instead, which is by definition sized for images.
+# The workflow puts the two on separate disks because a GitHub runner has two;
+# a workstation generally has one filesystem with room.
+ARCHIVE_DIR="${E2E_ARCHIVE_DIR:-$(dirname "${graph_root}")}"
+
+targets=("${graph_root}")
+[[ "${RECHUNK}" -eq 1 ]] && targets+=("${ARCHIVE_DIR}")
+
+# Two paths on one filesystem must not be asked for 40G each; dedupe by device.
+declare -A seen=()
+short=0
+for target in "${targets[@]}"; do
+    # Walk up to the nearest existing ancestor: podman's graph root may not
+    # exist yet on a machine that has never pulled an image.
+    probe="${target}"
+    while [[ ! -d "${probe}" && "${probe}" != "/" ]]; do
+        probe="$(dirname "${probe}")"
+    done
+
+    device="$(df -Pk "${probe}" | awk 'NR==2 {print $1}')"
+    [[ -n "${seen[${device}]:-}" ]] && continue
+    seen["${device}"]=1
+
+    avail_kb="$(df -Pk "${probe}" | awk 'NR==2 {print $4}')"
+    if [[ "${avail_kb}" -lt 41943040 ]]; then
+        printf 'run-e2e: %s (%s) has %sG free; want at least 40G\n' \
+            "${probe}" "${device}" "$((avail_kb / 1048576))" >&2
+        short=1
+    else
+        printf '  %-40s %sG free\n' "${probe}" "$((avail_kb / 1048576))"
+    fi
+done
+
+if [[ "${short}" -eq 1 ]]; then
+    printf 'run-e2e: the base image, akmods layers and the built image will not fit\n' >&2
     exit 1
 fi
-printf '  %sG free\n' "$((avail_kb / 1048576))"
 
 # --- build ------------------------------------------------------------------
 
@@ -152,7 +207,10 @@ if [[ "${RECHUNK}" -eq 1 ]]; then
     export CHUNKAH_CONFIG_STR
     CHUNKAH_CONFIG_STR="$(podman inspect --format '{{json .Config}}' "${BUILD_TAG}")"
 
-    archive="$(mktemp -t chunkah-e2e-XXXXXX.tar)"
+    # Assigned to the trap-tracked global before the long-running step, so a
+    # failure between here and the load still cleans up after itself.
+    mkdir -p "${ARCHIVE_DIR}"
+    ARCHIVE="$(mktemp "${ARCHIVE_DIR}/chunkah-e2e-XXXXXX.tar")"
     podman run --rm \
         --mount=type=image,src="${BUILD_TAG}",target=/chunkah \
         -e CHUNKAH_CONFIG_STR \
@@ -163,11 +221,12 @@ if [[ "${RECHUNK}" -eq 1 ]]; then
         --prune /sysroot/ \
         --label ostree.commit- \
         --label ostree.final-diffid- \
-        --tag "${CHUNKED_TAG}" >"${archive}"
+        --tag "${CHUNKED_TAG}" >"${ARCHIVE}"
 
     CREATED_TAGS+=("${CHUNKED_TAG}")
-    podman load -i "${archive}"
-    rm -f "${archive}"
+    podman load -i "${ARCHIVE}"
+    rm -f "${ARCHIVE}"
+    ARCHIVE=""
 
     TARGET="${CHUNKED_TAG}"
     pass "Chunkah produced a loadable image"
@@ -193,6 +252,18 @@ fi
 
 # A handful of assertions post-check.sh does not make, about the shape of the
 # thing a user would actually rebase onto.
+
+# The gap this script exists to cover is both Containerfile checks, not one of
+# them. post-check.sh looks at kernel and ZFS content; bootc container lint
+# checks filesystem invariants a re-layering could plausibly disturb. Running
+# only the first would report a fully passing rechunk that bootc would reject.
+if podman run --rm "${TARGET}" bootc container lint; then
+    pass "bootc container lint passes against the final image"
+else
+    fail "bootc container lint passes against the final image" \
+        "image: ${TARGET}" \
+        "if this failed only with --rechunk, the rechunk broke a bootc invariant"
+fi
 
 kernel_count="$(podman run --rm "${TARGET}" sh -c 'ls -1 /usr/lib/modules | wc -l')"
 if [[ "${kernel_count}" == "1" ]]; then

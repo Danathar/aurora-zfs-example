@@ -35,7 +35,10 @@ So there is no validation on the far side of the rechunk. `--rechunk` closes
 that loop locally: it rechunks with the same pinned Chunkah image and the same
 `--config-str` workaround the workflow uses, then runs `post-check.sh` again
 inside the result. `post-check.sh` is not copied into the image, so it is
-mounted in read-only.
+mounted in read-only. Both `Containerfile` checks are re-run, not just one:
+`post-check.sh` covers kernel and ZFS content, and `bootc container lint`
+covers the filesystem invariants a re-layering could plausibly disturb while
+leaving every module in place.
 
 If Chunkah ever drops, reorders or mangles something — a module, a udev rule, a
 systemd unit — this is what notices. Worth running after a Chunkah version bump,
@@ -47,6 +50,7 @@ which is the moment that risk is real.
 | --- | --- |
 | The build completes | Implies the in-build `post-check.sh` and `bootc container lint` passed |
 | `post-check.sh` against the final image | The whole point under `--rechunk` |
+| `bootc container lint` against the final image | The other half — a re-layering can disturb a bootc filesystem invariant while leaving every kernel and ZFS file intact |
 | Exactly one kernel module tree | |
 | `zpool` and `zfs` on `PATH` | ZFS userspace survived |
 | `containers.bootc=1` label | Informational — the workflow sets this, a local build does not |
@@ -59,9 +63,24 @@ tags and nothing else. The script never prunes and never touches an image it did
 not create. Without `--clean` it prints the `podman rmi` line for you to run
 yourself.
 
+The `--rechunk` archive is different: it is this script's own temporary file, so
+it is removed unconditionally on exit, `--clean` or not. Otherwise a rechunk
+that died on a full disk would leave several more gigabytes behind on the disk
+that was already full.
+
+It is written beside podman's storage rather than to `TMPDIR`, because `/tmp` is
+tmpfs on a typical Fedora or Aurora host — the archive is measured in gigabytes
+and would go to RAM. Override with `E2E_ARCHIVE_DIR` if you want it elsewhere.
+
+The free-space check follows the same reasoning: it probes the filesystems that
+actually receive data (podman's graph root, and the archive directory under
+`--rechunk`), deduplicated by device, rather than the checkout. Checking the
+checkout would let a run pass its own up-front check on a host with hundreds of
+free gigabytes and then die tens of minutes later.
+
 ## Requirements
 
-`podman`, about 40G free near the repo (checked up front, before the long part),
-and network access for the base and akmods images. `--rechunk` additionally
+`podman`, about 40G free on each filesystem that receives data (checked up
+front, before the long part), and network access for the base and akmods images. `--rechunk` additionally
 pulls the Chunkah image pinned in `run-e2e.sh`, which tracks the one in
 `.github/workflows/build.yml` by hand.
