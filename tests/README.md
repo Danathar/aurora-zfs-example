@@ -67,6 +67,13 @@ edit to both in one pull request. Making that impossible rather than merely
 conspicuous needs a required status check in branch protection, which no file in
 the tree can assert.
 
+The branch and activity filters are checked for the same reason. A path filter
+is not the only way a workflow stops running: point `build.yml`'s
+`pull_request` at another branch and it no longer runs on pull requests to
+`main`, while `coverage-gate.yml` keeps running and every path assertion still
+passes. Merge that and a source-only pull request runs no suite at all — the
+same hole, reached by a different door.
+
 ## End-to-end
 
 `tests/e2e/run-e2e.sh` builds the real image with podman and checks the real

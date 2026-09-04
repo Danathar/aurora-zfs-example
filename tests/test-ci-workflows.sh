@@ -295,7 +295,56 @@ for event in pull_request push; do
     done <<<"${ignored}"
 done
 
-# --- 4. status-badges.yml still skips pull requests -------------------------
+# --- 4. the filters that decide whether any of the above runs at all --------
+#
+# Every assertion above reasons about path filters, and none of them notices if
+# a workflow stops matching the *branch* or the *activity* instead. The two are
+# not interchangeable: point build.yml's pull_request at another branch and it
+# no longer runs on pull requests to main, while coverage-gate.yml keeps running
+# (the change touches .github/workflows/**, which it triggers on) and every
+# assertion here still passes. Merge that and a source-only pull request — one
+# touching neither docs nor workflows — runs no suite at all, which is the same
+# hole the path checks exist to close, reached by a different door.
+#
+# 'main' must appear rather than be the whole list: adding a second branch
+# widens what is covered and breaks nothing. Removing the filter entirely also
+# widens it, but it reads identically to a parser failure here, so it fails and
+# says so rather than being guessed at.
+
+check_triggers() {
+    local label=$1 file=$2 event
+    for event in pull_request push; do
+        local branches
+        branches=$(event_paths "${file}" "${event}" branches)
+        if grep -qxF 'main' <<<"${branches}"; then
+            _pass "${label}: ${event} still targets main"
+        else
+            _fail "${label}: ${event} still targets main" \
+                "extracted branches: ${branches//$'\n'/, }" \
+                "if the filter was widened or removed on purpose, update this test;" \
+                "if it was narrowed, this workflow no longer runs on ${event} to main"
+        fi
+    done
+
+    # No `types:` means the pull_request defaults — opened, synchronize,
+    # reopened — which is what makes the suite run on a pull request and again
+    # on every push to it. A narrower list is not necessarily wrong, but it is a
+    # decision about when the gate applies, so it should not arrive silently.
+    local types
+    types=$(event_paths "${file}" pull_request types)
+    if [[ -z "${types}" ]]; then
+        _pass "${label}: pull_request uses the default activity types"
+    else
+        _fail "${label}: pull_request uses the default activity types" \
+            "found types: ${types//$'\n'/, }" \
+            "confirm 'opened' and 'synchronize' are still among them, then update this test"
+    fi
+}
+
+check_triggers "build.yml" "${BUILD_WF}"
+check_triggers "coverage-gate.yml" "${COVERAGE_WF}"
+
+# --- 5. status-badges.yml still skips pull requests -------------------------
 #
 # This is why build.yml's tests job exists at all: ci/write-badges.sh is
 # executed by no other trigger on a pull request. If Status badges started
