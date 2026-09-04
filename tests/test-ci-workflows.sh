@@ -662,10 +662,23 @@ while IFS= read -r workflow; do
     # the same way: one file became unreadable to the parser -- an unrecognized
     # `steps:` spelling, a quoted key, a form it could not classify -- while the
     # other workflows kept the global count comfortably above its floor and the
-    # assertion below passed over a file it had never read. A file that mentions
-    # a run: key and yields no shell is that failure, and it is now loud.
+    # assertion below passed over a file it had never read. A file that looks
+    # like it has a run: key and yields no shell is that failure, and it is now
+    # loud.
+    #
+    # The detector is deliberately dumber than the parser -- a line-anchored
+    # grep, no structure -- because a guard that shared the parser's idea of
+    # what a step looks like would share its blind spots and confirm them.
+    #
+    # It errs toward firing. A job *output* named `run` matches it (ai-fix.yml
+    # declares one), so a workflow that had such an output and no run steps at
+    # all would trip this with nothing wrong. That is a red build asking a human
+    # to look at one named file, which is the safe direction for a guard in
+    # front of a security assertion; the fix then is to look, not to loosen it.
+    # A workflow whose steps are all `uses:` is not affected -- labeler.yml has
+    # no run: key at all and is silently and correctly skipped.
     if [[ "${file_lines}" -eq 0 ]] &&
-        grep -qE '(^|[[:space:]])["'"'"']?run["'"'"']?[[:space:]]*:' "${workflow}"; then
+        grep -qE '^[[:space:]]*(- )?["'"'"']?run["'"'"']?[[:space:]]*:' "${workflow}"; then
         unread_workflows+=("$(basename "${workflow}")")
     fi
 # GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
