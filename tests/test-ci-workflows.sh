@@ -479,8 +479,25 @@ if [[ -z "${badges}" ]]; then
     _fail "status-badges.yml has a badges job" "no 'badges:' job found in status-badges.yml"
 else
     _pass "status-badges.yml has a badges job"
-    assert_contains "status-badges.yml still skips pull requests" \
-        "${badges}" "github.event.workflow_run.event != 'pull_request'"
+
+    # The job-level condition is compared, not searched for. Broadening it to
+    # `always() || github.event.workflow_run.event != 'pull_request'` still
+    # contains the fragment while running the job after pull-request builds —
+    # and this job holds contents: write and pushes to the status branch.
+    badges_if=$(grep -m1 -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"${badges}")
+    badges_cond=${badges_if#*:}
+    badges_cond=${badges_cond#"${badges_cond%%[![:space:]]*}"}
+    badges_cond=${badges_cond%"${badges_cond##*[![:space:]]}"}
+    if [[ "${badges_cond}" == "github.event.workflow_run.event != 'pull_request'" ]]; then
+        _pass "status-badges.yml still skips pull requests"
+    else
+        _fail "status-badges.yml still skips pull requests" \
+            "expected exactly: github.event.workflow_run.event != 'pull_request'" \
+            "found: ${badges_cond:-<no job-level if:>}" \
+            "build.yml's tests job documents this skip as the reason it runs" \
+            "write-badges.sh on every pull request; a broadened condition also lets" \
+            "a job with contents: write push to the status branch from a PR build"
+    fi
 fi
 
 finish
