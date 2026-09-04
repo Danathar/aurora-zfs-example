@@ -9,15 +9,33 @@
 # and nothing failed — so this test makes that a red suite instead of a reader's
 # problem.
 #
-# Two passes, because the two kinds of reference fail differently:
+# Three passes, because the three kinds of reference fail differently:
 #
-#   1. the layout block, where the first field of every line is a path, and
-#   2. inline `code spans`, filtered down to the ones that look like repo paths.
+#   1. the layout block, where the first field of every line is a path,
+#   2. inline `code spans`, filtered down to the ones that look like repo paths,
+#      and
+#   3. Markdown link targets — `](path)` — in every tracked *.md.
 #
 # The filter for (2) is deliberately conservative. A span only has to exist if
 # it is unambiguously a path into this repo: no absolute paths (those are inside
 # the built image, e.g. /usr/lib/modules), no registry references, no globs.
 # A missed reference is a gap; a false positive would make the suite lie.
+#
+# (3) needs no filter at all, which is why it can cover documents (1) and (2)
+# deliberately leave alone. A code span is prose that may or may not be a path,
+# but a link target is an unambiguous claim that something is there — so every
+# relative one is checked, in every tracked Markdown file rather than just the
+# two an agent is told to trust. That matters because the cross-references now
+# form a graph: CONTRIBUTING.md, docs/risk-tiers.md, docs/SECURITY-AI.md and the
+# .github/prompts/*.prompt.md files point at each other and at workflow YAML
+# with `../` hops, so renaming one file breaks readers of another. `#anchors`
+# into a Markdown file are resolved too, against that file's real headings under
+# GitHub's slug rules, because a heading rename leaves the link working and the
+# reader stranded at the top of the page.
+#
+# Scope: relative targets only. http(s) and mailto are somebody else's uptime,
+# and fenced code blocks are skipped in both directions — a link inside an
+# example is a sample, not a claim.
 
 set -uo pipefail
 
@@ -137,5 +155,109 @@ for doc in README.md AGENTS.md; do
             "the code-span filter matched nothing, so this file is unverified"
     fi
 done
+
+# --- 3. Markdown link targets in every tracked *.md -------------------------
+
+# Everything outside fenced code blocks. A link in a fenced example is a sample,
+# not a claim about this repo, and the same fence rule has to apply when the
+# headings are collected or an example's `# comment` would register as one.
+outside_fences() {
+    awk '/^[ \t]*(```|~~~)/ { fenced = !fenced; next } !fenced' "$1"
+}
+
+# GitHub's heading slug: lower-cased, backticks and punctuation dropped, each
+# remaining space turned into a hyphen. Dropping punctuation does not join the
+# words around it, which is why "kernel / ZFS" slugs to "kernel--zfs" — the
+# doubled hyphen is correct and a link that omits it is broken.
+slugify() {
+    local text=${1,,}
+    text=${text//\`/}
+    text=$(printf '%s' "${text}" | LC_ALL=C sed -E 's/[^a-z0-9 _-]//g')
+    printf '%s' "${text// /-}"
+}
+
+# The slugs a Markdown file offers, one per line.
+heading_slugs() {
+    local heading
+    while IFS= read -r heading; do
+        printf '%s\n' "$(slugify "${heading}")"
+    done < <(outside_fences "$1" |
+        sed -nE 's/^#{1,6}[[:space:]]+(.*[^[:space:]])[[:space:]]*$/\1/p')
+}
+
+docs=()
+while IFS= read -r doc; do
+    docs+=("${doc}")
+done < <(cd "${REPO_ROOT}" && git ls-files '*.md' | sort)
+
+if [[ "${#docs[@]}" -eq 0 ]]; then
+    _fail "the repo tracks Markdown files" "git ls-files matched no *.md"
+fi
+
+links_checked=0
+anchors_checked=0
+
+for doc in "${docs[@]}"; do
+    doc_dir=$(dirname "${REPO_ROOT}/${doc}")
+
+    targets=$(outside_fences "${REPO_ROOT}/${doc}" |
+        grep -oE '\]\([^()[:space:]]+\)' | sed -E 's/^\]\(|\)$//g' | sort -u)
+
+    while IFS= read -r target; do
+        [[ -z "${target}" ]] && continue
+        # Somebody else's uptime.
+        [[ "${target}" =~ ^(https?|mailto): ]] && continue
+
+        anchor="${target#*#}"
+        path="${target%%#*}"
+        [[ "${target}" == *"#"* ]] || anchor=""
+
+        # A bare "#anchor" points inside the document that wrote it.
+        if [[ -z "${path}" ]]; then
+            resolved="${REPO_ROOT}/${doc}"
+        else
+            # No normalisation needed: the intermediate directories are real, so
+            # the filesystem resolves the "../" hops on its own.
+            resolved="${doc_dir}/${path%/}"
+            links_checked=$((links_checked + 1))
+            if [[ -e "${resolved}" ]]; then
+                _pass "${doc} links to an existing path: ${path}"
+            else
+                _fail "${doc} links to an existing path: ${path}" \
+                    "no such path, resolved from ${doc}: ${resolved#"${REPO_ROOT}"/}"
+                continue
+            fi
+        fi
+
+        # An anchor into a Markdown file has to name a heading it really has.
+        # Anchors into anything else (a directory listing, a YAML file rendered
+        # by GitHub) are not this test's business.
+        [[ -z "${anchor}" || "${resolved}" != *.md || ! -f "${resolved}" ]] && continue
+
+        anchors_checked=$((anchors_checked + 1))
+        if grep -qxF "${anchor}" <<<"$(heading_slugs "${resolved}")"; then
+            _pass "${doc} links to an existing heading: ${target}"
+        else
+            _fail "${doc} links to an existing heading: ${target}" \
+                "no heading in ${resolved#"${REPO_ROOT}"/} slugs to ${anchor}"
+        fi
+    done <<<"${targets}"
+done
+
+# Both counters guard the extraction itself: a regex that quietly stops matching
+# would otherwise turn this pass into a silent no-op that still reports green.
+if [[ "${links_checked}" -gt 0 ]]; then
+    _pass "the docs yielded ${links_checked} relative link target(s) to check"
+else
+    _fail "the docs yielded relative link target(s) to check" \
+        "the link extraction matched nothing, so every document is unverified"
+fi
+
+if [[ "${anchors_checked}" -gt 0 ]]; then
+    _pass "the docs yielded ${anchors_checked} in-document anchor(s) to check"
+else
+    _fail "the docs yielded in-document anchor(s) to check" \
+        "the anchor extraction matched nothing, so heading renames go unnoticed"
+fi
 
 finish
