@@ -21,6 +21,7 @@ present and skipped when not.
 | `test-coverage.sh`          | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason        |
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
 | `test-ci-workflows.sh`      | CI still runs this suite, and neither workflow's path filter leaves a gap                  |
+| `test-auto-qa-tuning.sh`    | every CI job has a timeout, and `.github/auto-qa-tuning.json` declares the number the YAML does |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -98,6 +99,38 @@ script without touching that manifest turns the suite red, so the decision gets
 made once, in the open. It is checked in both directions — a stale entry left
 behind by a deleted script fails too, as does a "covered by" claim naming a test
 file that does not exist or never mentions the script.
+
+## The duration manifest
+
+`test-auto-qa-tuning.sh` is the same idea applied to `.github/auto-qa-tuning.json`.
+
+`auto-qa.yml` compares each declared timeout against the slowest recent run, so
+a job growing into its cap is reported before it starts dying there. It has two
+blind spots, and both are silent. It reads the numbers in the manifest rather
+than the YAML — the manifest file says so itself — so a timeout raised in a
+workflow and left behind here makes the comparison measure a cap that nothing
+enforces. And it iterates `.jobs[]`, so a job absent from that list is never
+sampled at all; absence produces no output, which looks exactly like a healthy
+job.
+
+So the test checks both directions. A manifest entry naming a workflow or job
+that does not exist fails, as does one whose number disagrees with the YAML. In
+the other direction, every job under `.github/workflows/` must either appear in
+the manifest or in the test's `UNTRACKED` list with a reason, and must either
+declare `timeout-minutes:` or appear in `NO_TIMEOUT` with a reason — the same
+idiom `test-coverage.sh` uses for `UNCOVERED`, and for the same reason: a gap is
+allowed, but it has to be written down rather than arrived at by absence.
+
+Both lists are checked for rot in the other direction too. An entry whose job
+has since gained a timeout, or has since been added to the manifest, fails and
+asks to be removed. That matters for the case the test was written for: it
+cannot add a `timeout-minutes:` to `status-badges.yml` itself, because a change
+under `.github/workflows/` needs a maintainer, but the moment one lands the
+anti-rot check goes red and asks for the entry to be moved into the manifest.
+
+Job identity is the display `name:`, not the YAML key, because that is what
+`auto-qa.yml` matches against the API. A job with no `name:` is reported under
+its key, and the parser falls back to it.
 
 ## post-check.sh
 
