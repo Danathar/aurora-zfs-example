@@ -76,7 +76,12 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 BUILD_TAG="localhost/aurora-zfs-simple-e2e:${STAMP}"
 CHUNKED_TAG="localhost/aurora-zfs-simple-e2e:${STAMP}-chunked"
 CREATED_TAGS=()
+# Both are read by the EXIT trap below, which is installed before either is
+# given its real value. Under `set -u` an unset name there is a hard error, so
+# a failed prerequisite check would die inside cleanup instead of printing its
+# own message and exiting 1.
 ARCHIVE=""
+LOAD_TMPDIR=""
 
 FAILURES=0
 CHECKS=0
@@ -243,7 +248,7 @@ if [[ "${RECHUNK}" -eq 1 ]]; then
     rm -rf "${LOAD_TMPDIR}"
     rm -f "${ARCHIVE}"
     ARCHIVE=""
-LOAD_TMPDIR=""
+    LOAD_TMPDIR=""
 
     TARGET="${CHUNKED_TAG}"
     pass "Chunkah produced a loadable image"
