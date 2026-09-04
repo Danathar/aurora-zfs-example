@@ -17,6 +17,13 @@
 # flag window. rpm -V output puts the verification flags in columns 1-9 and the
 # path after them, so a payload-change letter is only meaningful in that window
 # -- an S, D, 5, L or P in a *filename* must not fail the build.
+#
+# The second property is which of those nine columns get a say. rpm writes '.'
+# for a test that passed and '?' for one it could not perform, and this is a
+# fail-closed gate in front of signing, so '?' must fail wherever a letter
+# would. That holds for the six payload columns (S M 5 D L P) and not for the
+# three the check deliberately ignores (U G T), which image assembly
+# normalizes. Both directions are asserted below.
 
 set -uo pipefail
 
@@ -219,6 +226,69 @@ EOF
 run_helper verify_rpm_payload kmod-zfs
 assert_contains "a missing line is classified as missing, not as a payload change" \
     "${OUTPUT}" "RPM verification found missing files for kmod-zfs"
+
+new_case payload-unverifiable-digest
+# rpm writes '?' in a column when the test could not be performed rather than
+# when it passed. A file it could not read comes back with '?' in the size and
+# digest columns; nothing else in the pipeline re-checks it, so "could not
+# verify" has to fail the same as "verified different".
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+?.?......    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "an unverifiable digest fails rather than passing on doubt" 1 "${STATUS}"
+assert_contains "reported as unverifiable, not as a payload change" \
+    "${OUTPUT}" "RPM verification could not check the payload for kmod-zfs"
+assert_contains "and prints the full rpm -V output for diagnosis" \
+    "${OUTPUT}" "zfs.ko.xz"
+
+new_case payload-unverifiable-link-target
+# The other producer of '?': a symlink whose target could not be resolved,
+# which lands in the L column.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+....?....    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "an unverifiable link target fails" 1 "${STATUS}"
+assert_contains "also reported as unverifiable" \
+    "${OUTPUT}" "RPM verification could not check the payload for kmod-zfs"
+
+new_case payload-unverifiable-everything
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+?????????    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a wholly unverifiable file fails" 1 "${STATUS}"
+
+new_case payload-unverifiable-metadata-only
+# The tolerance boundary, in the other direction. User, group and time are
+# ignored here because image assembly normalizes them, so a '?' in one of those
+# three columns says nothing about the payload and must not fail the build --
+# exactly as a U, G or T in the same column does not.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+.....???.    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "an unverifiable user/group/time is ignored like a differing one" 0 "${STATUS}"
+
+new_case payload-question-mark-in-the-filename-only
+# The filename companion to the letters-in-the-path case: a '?' outside the
+# nine-column window is part of a path, not a verdict.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+.........    /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/what?.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a '?' appearing in the path does not fail the check" 0 "${STATUS}"
 
 # ---------------------------------------------------------------------------
 # require_single_rpm_version: the split-stack failure it exists to catch
