@@ -252,6 +252,45 @@ run_block_lines() {
     ' "${file}"
 }
 
+# flow_style_steps <file>
+#
+# Prints "<line-number>:<content>" for step declarations written in YAML flow
+# style: `steps: [ ... ]`, or a `- { name: x, run: y }` item. Both are valid
+# YAML that GitHub executes, and run_block_lines cannot read either -- it finds
+# a run: key by its position at the start of a line, which a flow mapping never
+# gives it.
+#
+# The answer is to refuse the form, not to parse it. A flow-mapping parser means
+# nested braces, quoting, and line continuations, and being quietly wrong about
+# any of them puts the silent-skip hole straight back -- which is the whole
+# failure this section keeps being caught by. A step in block style is readable;
+# a step in flow style is a failure that names itself and its line.
+flow_style_steps() {
+    local file=$1
+    awk '
+        /^[[:space:]]*$/ { next }
+        { match($0, /^[[:space:]]*/); ws = RLENGTH }
+
+        # `steps: [ ... ]` -- a flow sequence, which never opens a block below.
+        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*\[/ {
+            print FNR ":" $0
+            next
+        }
+
+        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ {
+            steps_indent = ws
+            in_steps = 1
+            next
+        }
+        in_steps && ws <= steps_indent { in_steps = 0 }
+        !in_steps { next }
+
+        # `- { ... }` -- a flow mapping step. Anchored on the dash, so a `{` in
+        # shell inside a body, or in a ${{ }} expression, is not mistaken for one.
+        /^[[:space:]]*-[[:space:]]*\{/ { print FNR ":" $0 }
+    ' "${file}"
+}
+
 # --- the parser is tested before it is trusted ------------------------------
 #
 # An extractor that silently returns nothing would make every assertion below
@@ -311,6 +350,9 @@ jobs:
           && echo second-half"
         env:
           NOT_THE_CONTINUATION: yes
+  fourth:
+    steps:
+      - { name: Flow mapping, run: echo flow-mapping-script }
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -348,6 +390,16 @@ assert_contains "and its continuation, which is part of the same command" \
     "${runs}" "echo second-half"
 assert_not_contains "but not the env: that follows it" \
     "${runs}" "NOT_THE_CONTINUATION"
+
+# The refused form, asserted in both directions: the extractor genuinely cannot
+# read it, and the detector genuinely finds it. If run_block_lines ever learns
+# to read flow mappings, the first assertion fails and says to drop the refusal.
+assert_not_contains "the extractor cannot read a flow-mapping step" \
+    "${runs}" "echo flow-mapping-script"
+assert_contains "so the detector finds it instead" \
+    "$(flow_style_steps "${fixture}")" "run: echo flow-mapping-script"
+assert_eq "and finds nothing in block-style steps" \
+    "" "$(flow_style_steps "${fixture}" | grep -v flow-mapping || true)"
 
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
@@ -646,6 +698,7 @@ fi
 
 expression_offenders=()
 unread_workflows=()
+flow_style=()
 run_lines_seen=0
 while IFS= read -r workflow; do
     file_lines=0
@@ -681,6 +734,15 @@ while IFS= read -r workflow; do
         grep -qE '^[[:space:]]*(- )?["'"'"']?run["'"'"']?[[:space:]]*:' "${workflow}"; then
         unread_workflows+=("$(basename "${workflow}")")
     fi
+
+    # A step written in flow style is unreadable to the extractor by
+    # construction, and the guard above does not see it either: its detector is
+    # line-anchored, and a flow mapping puts the run: key mid-line. Reported on
+    # its own rather than parsed -- see flow_style_steps.
+    while IFS= read -r flow; do
+        [[ -z "${flow}" ]] && continue
+        flow_style+=("$(basename "${workflow}"):${flow}")
+    done < <(flow_style_steps "${workflow}")
 # GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
 # leave the other's expressions unchecked while Actions still ran the file.
 done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 \
@@ -694,6 +756,16 @@ if [[ "${run_lines_seen}" -lt 100 ]]; then
         "the assertion below would pass on an empty read; fix the parser first"
 else
     _pass "the run: extractor read the workflows (${run_lines_seen} lines of shell)"
+fi
+
+if [[ "${#flow_style[@]}" -eq 0 ]]; then
+    _pass "every step is written in block style, where the parser can read it"
+else
+    _fail "every step is written in block style, where the parser can read it" \
+        "flow-style steps are valid YAML that GitHub runs, and this test cannot" \
+        "read them -- so an expression spliced into one would go unchecked." \
+        "Rewrite these in block style:" \
+        "${flow_style[@]}"
 fi
 
 if [[ "${#unread_workflows[@]}" -eq 0 ]]; then
