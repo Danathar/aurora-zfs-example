@@ -15,7 +15,10 @@
       "Bash(gh run view:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr view:*)",
-      "Bash(skopeo inspect:*)"
+      "Bash(skopeo inspect:*)",
+      "Bash(podman ps:*)",
+      "Bash(podman images:*)",
+      "Bash(podman inspect:*)"
     ],
     "ask": [
       "Bash(gh api:*)",
