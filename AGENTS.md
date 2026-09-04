@@ -27,10 +27,35 @@ code or docs before acting — it is often right, but not automatically right.
 Fix what is valid and push to the same branch; push back with evidence on what
 is not. Either way, report what it found and what you did.
 
-**Do not block on it.** Give it a couple of minutes, and if no review has
-appeared, proceed and say so. An empty `/issues/<N>/comments` is not evidence
-the bot stayed silent — check the two endpoints above. Never sit in a polling
-loop waiting for it.
+**No review is not the same as no verdict.** When the bot has nothing to say it
+does not post — it reacts to the pull request with 👍, which neither endpoint
+above returns. Read that before concluding it stayed silent:
+
+```bash
+gh api repos/{owner}/{repo}/issues/<N>/reactions \
+  --jq '.[] | "\(.content) by \(.user.login)"'
+```
+
+A 👍 from `chatgpt-codex-connector[bot]` means it reviewed and found nothing.
+Reporting that as "no review appeared" throws away the one clean signal it
+gives.
+
+**Pushing a fix does not re-trigger it.** A review is bound to the commit it
+read, and the bot only reviews on three events: the PR being opened, a draft
+being marked ready, and the comment `@codex review`. Push a fix for a P2 and the
+PR still carries a review of the code before the fix, with nothing saying so
+except the `Reviewed commit:` line in the review body. Compare that against
+`git rev-parse HEAD`; if they differ and the difference matters, ask for another
+pass:
+
+```bash
+gh pr comment <N> --body "@codex review"
+```
+
+**Do not block on it.** Give it a couple of minutes, and if neither a review nor
+a 👍 has appeared, proceed and say so. An empty `/issues/<N>/comments` is not
+evidence the bot stayed silent — check the three endpoints above. Never sit in a
+polling loop waiting for it.
 
 ## What this image is
 
