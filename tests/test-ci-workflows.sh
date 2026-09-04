@@ -85,6 +85,10 @@ event_paths() {
     local file=$1 event=$2 key=$3
     awk -v event="${event}" -v key="${key}" '
         # Top-level "on:" opens the trigger block; any other column-0 key ends it.
+        # YAML ignores comment indentation, so a comment must never look like a
+        # structural key. build.yml has comment blocks at two spaces, exactly
+        # where an event name sits.
+        /^[[:space:]]*#/    { next }
         /^on:[[:space:]]*$/ { in_on = 1; next }
         /^[^[:space:]#]/    { in_on = 0 }
 
@@ -126,6 +130,10 @@ event_paths() {
 event_has_key() {
     local file=$1 event=$2 key=$3
     awk -v event="${event}" -v key="${key}" '
+        # YAML ignores comment indentation, so a comment must never look like a
+        # structural key. build.yml has comment blocks at two spaces, exactly
+        # where an event name sits.
+        /^[[:space:]]*#/    { next }
         /^on:[[:space:]]*$/ { in_on = 1; next }
         /^[^[:space:]#]/    { in_on = 0 }
         !in_on { next }
@@ -149,6 +157,7 @@ event_has_key() {
 job_block() {
     local file=$1 job=$2
     awk -v job="${job}" '
+        /^[[:space:]]*#/      { next }
         /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
         /^[^[:space:]#]/      { in_jobs = 0 }
 
@@ -228,7 +237,24 @@ check_runs_suite() {
     fi
     _pass "${label} has a tests job"
 
-    assert_contains "${label} runs the shell suite" "${block}" "./tests/run-tests.sh"
+    # The value is compared, not searched for. `run: ./tests/run-tests.sh || true`
+    # contains the command, passes a substring test and the continue-on-error
+    # check, and still returns success from a failing suite. Arguments are
+    # refused for the same reason: run-tests.sh takes a subset of the files.
+    suite_line=$(grep -E '^[[:space:]]+["'"'"']?run["'"'"']?[[:space:]]*:' <<<"${block}" |
+        grep -F 'run-tests.sh' | head -1)
+    suite_cmd=${suite_line#*:}
+    suite_cmd=${suite_cmd#"${suite_cmd%%[![:space:]]*}"}
+    suite_cmd=${suite_cmd%"${suite_cmd##*[![:space:]]}"}
+    if [[ "${suite_cmd}" == "./tests/run-tests.sh" ]]; then
+        _pass "${label} runs the shell suite"
+    else
+        _fail "${label} runs the shell suite" \
+            "expected the step to run exactly ./tests/run-tests.sh" \
+            "found: ${suite_cmd:-<no run: step invoking run-tests.sh>}" \
+            "a suffix such as '|| true' returns success from a failing suite;" \
+            "an argument runs only part of it"
+    fi
     assert_contains "${label} installs shellcheck" "${block}" "apt-get install -y shellcheck"
 
     # Running the suite is not the same as being gated by it. `continue-on-error`
