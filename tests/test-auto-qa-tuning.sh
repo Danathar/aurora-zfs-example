@@ -27,6 +27,11 @@
 #   * every `jobs` entry names a job that exists                  (stale after a rename)
 #   * every `jobs` entry's timeout_minutes equals the YAML's      (the drift above)
 #
+# and, because the whole file is about a manifest that matters only insofar as
+# one workflow reads it, that auto-qa.yml still reads it and still iterates
+# .jobs[]. Without that last pair, every assertion here can keep passing over a
+# file nothing uses.
+#
 # `untracked` is the same idiom as test-coverage.sh's UNCOVERED: not-watched is
 # a legitimate answer, but it has to be an answer. It lives in the JSON rather
 # than in this file because it is a statement about the manifest, and the person
@@ -136,6 +141,12 @@ jobs:
     steps:
       - name: Another step
         run: echo hi
+  gamma:
+    name: "Quoted Gamma"
+    timeout-minutes: 12  # a trailing comment is not part of the number
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
 FIXTURE
 
 fixture_jobs=$(workflow_jobs "${fixture}")
@@ -143,7 +154,9 @@ assert_eq "parser reads a job's name and timeout" \
     "alpha	Named Alpha	7" "$(grep '^alpha	' <<<"${fixture_jobs}")"
 assert_eq "parser falls back to the job id, and reports a missing timeout" \
     "beta	beta	NONE" "$(grep '^beta	' <<<"${fixture_jobs}")"
-assert_eq "parser reads exactly the two jobs" 2 "$(wc -l <<<"${fixture_jobs}")"
+assert_eq "parser unquotes a quoted job name, and drops a trailing comment" \
+    "gamma	Quoted Gamma	12" "$(grep '^gamma	' <<<"${fixture_jobs}")"
+assert_eq "parser reads exactly the three jobs" 3 "$(wc -l <<<"${fixture_jobs}")"
 
 # --- the manifest itself parses ---------------------------------------------
 
@@ -166,12 +179,25 @@ if [[ -z "${tracked}" ]]; then
     exit
 fi
 
+duplicates=$(sort <<<"${tracked}" | uniq -d)
+if [[ -z "${duplicates}" ]]; then
+    _pass "no workflow/job pair is tracked twice"
+else
+    _fail "no workflow/job pair is tracked twice" \
+        "duplicated: ${duplicates//$'\n'/, }" \
+        "auto-qa.yml iterates the list, so it would sample the job twice and" \
+        "report two rows for one job"
+fi
+
 # --- 1. every job in every workflow is bounded, and has a decision ----------
 
 workflows=()
 while IFS= read -r file; do
     workflows+=("${file}")
-done < <(find "${WORKFLOW_DIR}" -maxdepth 1 -name '*.yml' -type f | sort)
+# GitHub loads .yaml as readily as .yml; scanning only one extension would
+# leave the other's jobs unbounded and undeclared while Actions still ran them.
+done < <(find "${WORKFLOW_DIR}" -maxdepth 1 \
+    \( -name '*.yml' -o -name '*.yaml' \) -type f | sort)
 
 if [[ "${#workflows[@]}" -eq 0 ]]; then
     _fail "found workflow files to check" "no *.yml under ${WORKFLOW_DIR}"
@@ -285,5 +311,38 @@ for key in sample_size at_risk_ratio loose_ratio statistic; do
             "comparison in that workflow run against an empty string"
     fi
 done
+
+# auto-qa.yml tests at_risk first and loose second, so the two ratios have to
+# stay ordered. Overlap makes the advisory verdict unreachable, or reports an
+# at-risk job as merely loose.
+at_risk=$(jq -r '.policy.at_risk_ratio // empty' "${CONFIG}")
+loose=$(jq -r '.policy.loose_ratio // empty' "${CONFIG}")
+if [[ -n "${at_risk}" && -n "${loose}" ]] &&
+    awk -v a="${at_risk}" -v l="${loose}" 'BEGIN { exit !(l + 0 < a + 0 && a + 0 <= 1) }'; then
+    _pass "loose_ratio is below at_risk_ratio, which is at most 1"
+else
+    _fail "loose_ratio is below at_risk_ratio, which is at most 1" \
+        "at_risk_ratio=${at_risk:-<absent>}, loose_ratio=${loose:-<absent>}"
+fi
+
+# --- 4. and auto-qa.yml still reads the file all of this polices ------------
+#
+# Every assertion above is about a manifest that matters only because one
+# workflow reads it. Point auto-qa.yml at another path, or drop the jq call
+# that iterates .jobs[], and this whole file keeps passing over something
+# nothing uses.
+
+AUTO_QA="${WORKFLOW_DIR}/auto-qa.yml"
+if [[ ! -f "${AUTO_QA}" ]]; then
+    _fail "auto-qa.yml exists" \
+        "the workflow that reads this manifest is gone, and with it the reason" \
+        "the manifest exists at all"
+else
+    auto_qa_body=$(cat "${AUTO_QA}")
+    assert_contains "auto-qa.yml still reads .github/auto-qa-tuning.json" \
+        "${auto_qa_body}" "CONFIG: .github/auto-qa-tuning.json"
+    assert_contains "auto-qa.yml still iterates the manifest's jobs" \
+        "${auto_qa_body}" '.jobs[] | [.workflow, .job, .timeout_minutes] | @tsv'
+fi
 
 finish
