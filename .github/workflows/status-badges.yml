@@ -30,6 +30,13 @@ jobs:
   badges:
     name: Publish status badges
     runs-on: ubuntu-24.04
+    # Two skopeo inspects against a registry and a git push: minutes, not
+    # hours. Without this the job inherits GitHub's 360-minute default, and a
+    # skopeo hung against an unresponsive registry would hold a runner with
+    # contents: write for six hours. Declared here and tracked in
+    # .github/auto-qa-tuning.json, so growth into the cap is reported before a
+    # run dies at it.
+    timeout-minutes: 15
     # A PR build tells us nothing the scheduled run won't, and must not push to
     # the status branch. On schedule/dispatch there is no workflow_run payload,
     # so this is null and the condition passes.

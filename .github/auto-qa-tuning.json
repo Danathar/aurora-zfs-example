@@ -68,6 +68,42 @@
       "workflow": "labeler.yml",
       "job": "Apply area labels",
       "timeout_minutes": 5
+    },
+    {
+      "workflow": "status-badges.yml",
+      "job": "Publish status badges",
+      "timeout_minutes": 15,
+      "note": "Two skopeo inspects and a git push. 15 matches nightly-compliance.yml's Published image, which does the same kind of registry work."
+    },
+    {
+      "workflow": "auto-qa.yml",
+      "job": "Compare timeouts against observed durations",
+      "timeout_minutes": 10,
+      "note": "This job. Its runtime scales with the length of the list above -- each entry costs two run listings plus up to 2 x sample_size job queries -- so it is the one job here whose drift this repo causes directly."
+    }
+  ],
+
+  "_untracked": [
+    "Jobs that declare a timeout but are deliberately not sampled above. An",
+    "absent job is indistinguishable from a forgotten one, so the decision is",
+    "recorded as data rather than implied by omission, and",
+    "tests/test-auto-qa-tuning.sh requires every job in .github/workflows to",
+    "appear in exactly one of the two lists.",
+    "",
+    "Nothing reads this at run time. It exists so the next person to ask 'why",
+    "isn't ai-fix here?' finds the answer instead of adding it and getting",
+    "noise."
+  ],
+  "untracked": [
+    {
+      "workflow": "ai-fix.yml",
+      "job": "Run the agent",
+      "reason": "Duration is set by the model, not by this repo's code. The number would move on its own with no change here to explain it, which is the definition of a metric that trains people to ignore it. The 30-minute cap is a budget, not a measurement."
+    },
+    {
+      "workflow": "ai-fix.yml",
+      "job": "Check credentials and target",
+      "reason": "Runs only when someone labels an issue ai-fix-requested, so the sample is usually empty and the row would read 'no successful runs sampled' indefinitely. Bounded at 5 minutes for a handful of gh api calls."
     }
   ]
 }
