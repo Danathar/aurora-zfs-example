@@ -20,6 +20,7 @@ present and skipped when not.
 | `test-shell-syntax.sh`      | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed            |
 | `test-coverage.sh`          | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason        |
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
+| `test-ci-workflows.sh`      | CI still runs this suite, and neither workflow's path filter leaves a gap                  |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -42,6 +43,36 @@ some time while the file was `renovate.json` at the repo root. It checks the
 "Repository Layout" block line by line, then the inline code spans, anchoring
 the filter on `git ls-files` so that GitHub `org/repo` references are skipped
 while anything rooted in a real top-level entry is enforced.
+
+`test-ci-workflows.sh` closes the same kind of gap one level up. Everything in
+the "In CI" section below was, until it existed, prose that nothing checked: the
+suite could keep passing while the workflow that runs it was renamed, stripped
+of its `shellcheck` install, or unhooked from `build_push`. The path filters are
+the sharp case, because a workflow that stops running is not a workflow that
+fails — a `paths-ignore` that grows a third entry produces a *green* result on
+the very change that stopped being covered. It reads the YAML with an
+indentation-anchored parser rather than adding a dependency, and exercises that
+parser against a fixture first, so a reformat it cannot follow fails the suite
+instead of passing over an empty extraction.
+
+What runs that test matters as much as what it asserts, and this is the part a
+first draft got wrong. A `pull_request` run executes the *head* branch's copy of
+a workflow file, so a pull request deleting the `Shell tests` job from
+`build.yml` would be checked by the `build.yml` that no longer has it — the
+suite that would have gone red is the suite that no longer runs. So
+`coverage-gate.yml` triggers on `.github/workflows/**` too, and the test asserts
+that it does: any workflow edit is checked by a workflow the pull request did
+not touch, and the two files police each other. Disabling the gate now takes an
+edit to both in one pull request. Making that impossible rather than merely
+conspicuous needs a required status check in branch protection, which no file in
+the tree can assert.
+
+The branch and activity filters are checked for the same reason. A path filter
+is not the only way a workflow stops running: point `build.yml`'s
+`pull_request` at another branch and it no longer runs on pull requests to
+`main`, while `coverage-gate.yml` keeps running and every path assertion still
+passes. Merge that and a source-only pull request runs no suite at all — the
+same hole, reached by a different door.
 
 ## End-to-end
 
@@ -120,10 +151,19 @@ the image build.
 
 `build.yml` sets `paths-ignore` for `README.md` and `docs/**` though, so a
 change touching only those starts no run there.
-`.github/workflows/coverage-gate.yml` triggers on exactly that complement and
-runs the same suite, so a docs-only change is no longer the one kind of change
-nothing verifies. One workflow or the other runs the suite; a change touching
-both docs and code trips both.
+`.github/workflows/coverage-gate.yml` triggers on that complement and runs the
+same suite, so a docs-only change is no longer the one kind of change nothing
+verifies. One workflow or the other runs the suite; a change touching both docs
+and code trips both.
+
+`coverage-gate.yml` also triggers on `.github/workflows/**`, which is the
+deliberate exception to "one or the other": it is what lets it check a change to
+`build.yml`, which `build.yml` cannot check for itself.
+
+All four of those facts — both workflows running the suite with `shellcheck`
+installed first, `needs: tests`, and every path one workflow ignores being
+picked up by the other — are asserted by `test-ci-workflows.sh`, so this section
+is enforced rather than merely accurate.
 
 Running on `pull_request` is what closes the gap this suite was written for:
 `ci/write-badges.sh` is executed by no other trigger here — the `Status badges`

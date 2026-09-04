@@ -9,10 +9,24 @@ name: Coverage gate
 # of change here that nothing verified — including the docs-versus-tree checks
 # the suite is the natural home for.
 #
-# The trigger here is the exact complement of that paths-ignore, so for a given
+# The trigger here covers the complement of that paths-ignore, so for a given
 # change one workflow or the other runs the suite rather than both. A pull
 # request touching docs *and* code trips both and runs it twice; that costs
 # under a minute and is not worth a filter to avoid.
+#
+# `.github/workflows/**` is the deliberate exception to "one or the other", and
+# it is here for a reason that is easy to miss. A `pull_request` run executes the
+# *head* branch's copy of a workflow file (measured on this repo — see
+# docs/SECURITY-AI.md), so a pull request that deletes the `Shell tests` job from
+# build.yml is checked by the build.yml that no longer has it. The suite that
+# would have failed is the suite that no longer runs, and build_push proceeds.
+#
+# Triggering here on any workflow change means that edit is still checked, by a
+# workflow the pull request did not touch: tests/test-ci-workflows.sh runs and
+# fails. The two files verify each other, so disabling the gate takes an edit to
+# both in one pull request rather than one line in one file. Closing that last
+# gap needs a required status check in branch protection, which is not something
+# a file in the tree can assert.
 #
 # The coverage assertion itself lives in tests/test-coverage.sh, so it runs
 # locally too. This workflow is where it is enforced, not where it is defined.
@@ -25,6 +39,7 @@ on:
       - 'README.md'
       - '**/README.md'
       - 'docs/**'
+      - '.github/workflows/**'
   push:
     branches:
       - main
@@ -32,6 +47,7 @@ on:
       - 'README.md'
       - '**/README.md'
       - 'docs/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 concurrency:
