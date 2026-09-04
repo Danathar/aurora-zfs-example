@@ -200,35 +200,48 @@ run_block_lines() {
 
         { match($0, /^[[:space:]]*/); ws = RLENGTH }
 
-        # Close an open body first: anything at or left of the run: key ends it.
+        # Close an open value first: anything at or left of the run: key ends
+        # it. This one rule covers both shapes a value can take, which is why
+        # they are not parsed separately below -- a block scalar body and a
+        # flow scalar continued onto further lines are delimited identically.
         in_run && ws <= run_indent { in_run = 0 }
         in_run { print FNR ":" $0; next }
 
-        /^[[:space:]]*steps:[[:space:]]*$/ { steps_indent = ws; in_steps = 1; next }
+        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*$/ {
+            steps_indent = ws
+            in_steps = 1
+            next
+        }
         in_steps && ws <= steps_indent { in_steps = 0 }
         !in_steps { next }
 
-        # Every run: key is classified, and none is skipped. Splitting this
-        # into two patterns and letting a line match neither is how a body goes
-        # missing without anything saying so -- `run: | # why` is valid YAML
-        # that an end-anchored block pattern rejects, and the assertion below
-        # then passes over a script it never read.
-        /^[[:space:]]*(- )?run:/ {
+        # Quoted keys are valid YAML and mean the same thing, so `- "run":` is
+        # a step GitHub executes. event_has_key above accepts them for the same
+        # reason this does: absence is the passing condition, and a spelling
+        # the parser cannot see reads as "no script here".
+        /^[[:space:]]*(- )?["\047]?run["\047]?[[:space:]]*:/ {
+            # The column of the key itself, not of the line, so a sibling key
+            # closes the value even in the `- run:` form where the dash sits
+            # left of the key.
+            prefix = $0
+            sub(/["\047]?run["\047]?[[:space:]]*:.*$/, "", prefix)
+            run_indent = length(prefix)
+            in_run = 1
+
             rest = $0
-            sub(/^[[:space:]]*(- )?run:[[:space:]]*/, "", rest)
+            sub(/^[[:space:]]*(- )?["\047]?run["\047]?[[:space:]]*:[[:space:]]*/, "", rest)
 
-            # A block scalar indicator, with its optional chomping/indentation
-            # modifiers and an optional comment, opens a body.
-            if (rest ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
-                prefix = $0
-                sub(/run:.*$/, "", prefix)
-                run_indent = length(prefix)
-                in_run = 1
-                next
-            }
+            # A block scalar indicator -- with its optional chomping and
+            # indentation modifiers, and an optional comment -- means the whole
+            # script is on the lines below, so this line holds no shell.
+            if (rest ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) next
 
-            # Anything else is a single-line script, which can splice just as
-            # readily as a block one.
+            # Otherwise the value starts here. It may also continue: YAML lets
+            # a quoted or plain scalar run onto the following lines as long as
+            # they are indented past the key, so `run: "echo safe` and an
+            # indented `&& echo ${{ ... }}"` are one command. Printing this line
+            # and stopping would record the safe half only; in_run above keeps
+            # reading until the indentation says the value ended.
             print FNR ":" $0
             next
         }
@@ -288,6 +301,12 @@ jobs:
           echo dash-form-body
         env:
           ALSO_NOT_THE_BODY: yes
+      - "run": echo quoted-key-script
+      - name: A flow scalar continued onto a second line
+        run: "echo first-half
+          && echo second-half"
+        env:
+          NOT_THE_CONTINUATION: yes
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -317,6 +336,14 @@ assert_contains "parser reads a body whose indicator carries a comment" \
     "${runs}" "echo commented-indicator-body"
 assert_not_contains "and still stops at that step's env:" \
     "${runs}" "STILL_NOT_THE_BODY"
+assert_contains "parser reads a quoted run key, which GitHub runs just the same" \
+    "${runs}" "echo quoted-key-script"
+assert_contains "parser reads the first line of a flow scalar" \
+    "${runs}" "echo first-half"
+assert_contains "and its continuation, which is part of the same command" \
+    "${runs}" "echo second-half"
+assert_not_contains "but not the env: that follows it" \
+    "${runs}" "NOT_THE_CONTINUATION"
 
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
