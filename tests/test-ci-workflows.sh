@@ -207,7 +207,11 @@ run_block_lines() {
         in_run && ws <= run_indent { in_run = 0 }
         in_run { print FNR ":" $0; next }
 
-        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*$/ {
+        # A trailing comment is legal after any key, here as much as after a
+        # block scalar indicator below. Anchoring this to end-of-line meant
+        # `steps: # build steps` never opened the block, and every run: in that
+        # job went unread.
+        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ {
             steps_indent = ws
             in_steps = 1
             next
@@ -641,15 +645,29 @@ fi
 # new file starts out held to the same rule.
 
 expression_offenders=()
+unread_workflows=()
 run_lines_seen=0
 while IFS= read -r workflow; do
+    file_lines=0
     while IFS= read -r hit; do
         [[ -z "${hit}" ]] && continue
         run_lines_seen=$((run_lines_seen + 1))
+        file_lines=$((file_lines + 1))
         # shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
         [[ "${hit}" == *'${{'* ]] || continue
         expression_offenders+=("$(basename "${workflow}"):${hit}")
     done < <(run_block_lines "${workflow}")
+
+    # Per file, not just in total. Every evasion found in review so far worked
+    # the same way: one file became unreadable to the parser -- an unrecognized
+    # `steps:` spelling, a quoted key, a form it could not classify -- while the
+    # other workflows kept the global count comfortably above its floor and the
+    # assertion below passed over a file it had never read. A file that mentions
+    # a run: key and yields no shell is that failure, and it is now loud.
+    if [[ "${file_lines}" -eq 0 ]] &&
+        grep -qE '(^|[[:space:]])["'"'"']?run["'"'"']?[[:space:]]*:' "${workflow}"; then
+        unread_workflows+=("$(basename "${workflow}")")
+    fi
 # GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
 # leave the other's expressions unchecked while Actions still ran the file.
 done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 \
@@ -663,6 +681,15 @@ if [[ "${run_lines_seen}" -lt 100 ]]; then
         "the assertion below would pass on an empty read; fix the parser first"
 else
     _pass "the run: extractor read the workflows (${run_lines_seen} lines of shell)"
+fi
+
+if [[ "${#unread_workflows[@]}" -eq 0 ]]; then
+    _pass "every workflow containing a run: key yielded shell to the parser"
+else
+    _fail "every workflow containing a run: key yielded shell to the parser" \
+        "the parser read nothing from: ${unread_workflows[*]}" \
+        "its steps are invisible to the assertion below, which would pass" \
+        "on the strength of the other workflows alone"
 fi
 
 if [[ "${#expression_offenders[@]}" -eq 0 ]]; then
