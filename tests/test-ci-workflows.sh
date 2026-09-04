@@ -133,7 +133,12 @@ event_has_key() {
             in_event = ($0 ~ "^  " event ":[[:space:]]*$")
             next
         }
-        in_event && $0 ~ "^    " key ":" { found = 1 }
+        # Quoted keys are valid YAML and mean the same thing. This matters here
+        # and not in event_paths, because absence is the passing condition: a
+        # spelling this cannot see reads as "not declared". The single quote is
+        # written as \047 because this awk program is inside a single-quoted
+        # shell string, where a literal one would end the program early.
+        in_event && $0 ~ ("^    [\"\047]?" key "[\"\047]?[[:space:]]*:") { found = 1 }
         END { exit !found }
     ' "${file}"
 }
@@ -229,14 +234,14 @@ check_runs_suite() {
     # Running the suite is not the same as being gated by it. `continue-on-error`
     # leaves a red suite in a green job, and an `if:` on the step or the job can
     # skip it outright — both leave every assertion above satisfied.
-    if grep -qE '^[[:space:]]+continue-on-error:' <<<"${block}"; then
+    if grep -qE '^[[:space:]]+["'"'"']?continue-on-error["'"'"']?[[:space:]]*:' <<<"${block}"; then
         _fail "${label}'s tests job fails when the suite fails" \
             "continue-on-error is set somewhere in the job; a red suite would leave it green"
     else
         _pass "${label}'s tests job fails when the suite fails"
     fi
 
-    if grep -qE '^[[:space:]]+if:' <<<"${block}"; then
+    if grep -qE '^[[:space:]]+["'"'"']?if["'"'"']?[[:space:]]*:' <<<"${block}"; then
         _fail "${label}'s tests job is unconditional" \
             "an if: condition appears in the job; the suite can be skipped without failing" \
             "if the condition is deliberate, update this test to say so"
@@ -267,11 +272,41 @@ if [[ -z "${build_push}" ]]; then
     _fail "build.yml has a build_push job" "no 'build_push:' job found in build.yml"
 else
     _pass "build.yml has a build_push job"
-    assert_contains "build_push needs the tests job" "${build_push}" "needs: tests"
+
+    # Parsed rather than substring-matched: "needs: tests" is a prefix of
+    # "needs: tests_bypass", and a commented-out line contains it too. Both
+    # spellings GitHub accepts are read — a scalar and a list — because the
+    # assertion is about the dependency, not about how it is written.
+    needs_line=$(grep -m1 -E '^    ["'"'"']?needs["'"'"']?[[:space:]]*:' <<<"${build_push}")
+    needs_deps=""
+    if [[ -z "${needs_line}" ]]; then
+        _fail "build_push needs the tests job" \
+            "build_push declares no needs: at all; a red suite would not block the build"
+    else
+        needs_value=${needs_line#*:}
+        needs_value=${needs_value#"${needs_value%%[![:space:]]*}"}
+        if [[ -z "${needs_value}" ]]; then
+            # Block list: the entries follow on their own lines.
+            needs_deps=$(sed -n '/^    ["'"'"']\?needs["'"'"']\?[[:space:]]*:[[:space:]]*$/,/^    [^ ]/p' <<<"${build_push}" |
+                sed -nE 's/^      -[[:space:]]+["'"'"']?([A-Za-z0-9_-]+)["'"'"']?[[:space:]]*$/\1/p')
+        else
+            # Scalar or inline flow list.
+            needs_deps=$(tr -d '[]"'"'"'' <<<"${needs_value}" | tr ',' '\n' |
+                sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | grep -v '^$')
+        fi
+
+        if grep -qxF 'tests' <<<"${needs_deps}"; then
+            _pass "build_push needs the tests job"
+        else
+            _fail "build_push needs the tests job" \
+                "parsed dependencies: ${needs_deps//$'\n'/, }" \
+                "'tests' is not among them, so a red suite would not block the build"
+        fi
+    fi
 
     # `needs:` alone is not a gate. A job-level `if:` — always() being the usual
     # one — makes a job run even when the job it needs failed.
-    if grep -qE '^    if:' <<<"${build_push}"; then
+    if grep -qE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"${build_push}"; then
         _fail "build_push has no job-level if: overriding needs" \
             "a job-level if: can run build_push even when tests failed (e.g. always());" \
             "step-level if: is fine and not what this checks"
