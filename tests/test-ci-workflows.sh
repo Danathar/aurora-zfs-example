@@ -117,6 +117,27 @@ event_paths() {
     ' "${file}"
 }
 
+# event_has_key <file> <event> <key>
+#
+# True if `on: <event>:` declares <key> at all, in any YAML style. event_paths
+# reads block sequences only, so an inline `types: [closed]` extracts nothing
+# and is indistinguishable from an absent key — which matters wherever *absence*
+# is the passing condition.
+event_has_key() {
+    local file=$1 event=$2 key=$3
+    awk -v event="${event}" -v key="${key}" '
+        /^on:[[:space:]]*$/ { in_on = 1; next }
+        /^[^[:space:]#]/    { in_on = 0 }
+        !in_on { next }
+        /^  [^[:space:]]/ {
+            in_event = ($0 ~ "^  " event ":[[:space:]]*$")
+            next
+        }
+        in_event && $0 ~ "^    " key ":" { found = 1 }
+        END { exit !found }
+    ' "${file}"
+}
+
 # job_block <file> <job>
 #
 # Prints the body of one entry under the top-level `jobs:` key.
@@ -205,6 +226,24 @@ check_runs_suite() {
     assert_contains "${label} runs the shell suite" "${block}" "./tests/run-tests.sh"
     assert_contains "${label} installs shellcheck" "${block}" "apt-get install -y shellcheck"
 
+    # Running the suite is not the same as being gated by it. `continue-on-error`
+    # leaves a red suite in a green job, and an `if:` on the step or the job can
+    # skip it outright — both leave every assertion above satisfied.
+    if grep -qE '^[[:space:]]+continue-on-error:' <<<"${block}"; then
+        _fail "${label}'s tests job fails when the suite fails" \
+            "continue-on-error is set somewhere in the job; a red suite would leave it green"
+    else
+        _pass "${label}'s tests job fails when the suite fails"
+    fi
+
+    if grep -qE '^[[:space:]]+if:' <<<"${block}"; then
+        _fail "${label}'s tests job is unconditional" \
+            "an if: condition appears in the job; the suite can be skipped without failing" \
+            "if the condition is deliberate, update this test to say so"
+    else
+        _pass "${label}'s tests job is unconditional"
+    fi
+
     # Order matters: installing shellcheck after the suite has run would leave
     # test-shell-syntax.sh's shellcheck pass skipped, and skipping is silent.
     local install_line run_line
@@ -229,6 +268,16 @@ if [[ -z "${build_push}" ]]; then
 else
     _pass "build.yml has a build_push job"
     assert_contains "build_push needs the tests job" "${build_push}" "needs: tests"
+
+    # `needs:` alone is not a gate. A job-level `if:` — always() being the usual
+    # one — makes a job run even when the job it needs failed.
+    if grep -qE '^    if:' <<<"${build_push}"; then
+        _fail "build_push has no job-level if: overriding needs" \
+            "a job-level if: can run build_push even when tests failed (e.g. always());" \
+            "step-level if: is fine and not what this checks"
+    else
+        _pass "build_push has no job-level if: overriding needs"
+    fi
 fi
 
 # --- 3. every path build.yml ignores is covered by coverage-gate.yml --------
@@ -316,6 +365,17 @@ check_triggers() {
     for event in pull_request push; do
         local branches
         branches=$(event_paths "${file}" "${event}" branches)
+        # Ordered negation applies here exactly as it does to paths: `- main`
+        # followed by `- '!main'` leaves main excluded, and a membership test
+        # sees only the positive entry.
+        if negated=$(grep -- '^!' <<<"${branches}"); then
+            _fail "${label}: ${event} branch filter uses no '!' negation" \
+                "found: ${negated//$'\n'/, }" \
+                "GitHub applies these in order, so a later negation can exclude main" \
+                "while the membership check below still sees it"
+            continue
+        fi
+        _pass "${label}: ${event} branch filter uses no '!' negation"
         if grep -qxF 'main' <<<"${branches}"; then
             _pass "${label}: ${event} still targets main"
         else
@@ -330,14 +390,16 @@ check_triggers() {
     # reopened — which is what makes the suite run on a pull request and again
     # on every push to it. A narrower list is not necessarily wrong, but it is a
     # decision about when the gate applies, so it should not arrive silently.
-    local types
-    types=$(event_paths "${file}" pull_request types)
-    if [[ -z "${types}" ]]; then
-        _pass "${label}: pull_request uses the default activity types"
-    else
+    #
+    # Tested for key *presence*, not for an empty extraction: `types: [closed]`
+    # is valid YAML that event_paths cannot read, and treating that silence as
+    # "no types declared" would turn the narrowest possible filter into a pass.
+    if event_has_key "${file}" pull_request types; then
         _fail "${label}: pull_request uses the default activity types" \
-            "found types: ${types//$'\n'/, }" \
-            "confirm 'opened' and 'synchronize' are still among them, then update this test"
+            "a types: key is declared; confirm 'opened' and 'synchronize' are" \
+            "still among them, then update this test"
+    else
+        _pass "${label}: pull_request uses the default activity types"
     fi
 }
 
