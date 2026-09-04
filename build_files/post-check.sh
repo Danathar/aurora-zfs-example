@@ -104,6 +104,7 @@ verify_rpm_payload() {
     local verify_output
     local line
     local flags
+    local payload_flags
 
     verify_output=$(rpm -V "${pkg}" 2>&1 || true)
     while IFS= read -r line; do
@@ -114,12 +115,30 @@ verify_rpm_payload() {
             fail "RPM verification found missing files for ${pkg}"
         fi
 
-        # The first nine characters are rpm's verification flags. Example:
-        # ".....UGT." means only user/group/time differ, which is acceptable here.
+        # The first nine characters are rpm's verification flags, one column
+        # each, in the order S M 5 D L U G T P. Example: ".....UGT." means only
+        # user/group/time differ, which is acceptable here.
         flags=${line:0:9}
-        if [[ "${flags}" =~ [SM5DLP] ]]; then
+
+        # U, G and T are the three normalized during image assembly. Every
+        # other column describes the payload itself: size, mode, digest,
+        # device numbers, link target and capabilities.
+        payload_flags="${flags:0:5}${flags:8:1}"
+
+        if [[ "${payload_flags}" =~ [SM5DLP] ]]; then
             printf '%s\n' "${verify_output}" >&2
             fail "RPM verification found payload changes for ${pkg}"
+        fi
+
+        # rpm writes '?' in a column when it could not run that test at all --
+        # the file could not be read, or its link target could not be resolved
+        # (rpm -V's READFAIL and READLINKFAIL, which land in the S, 5 and L
+        # columns). That is not '.', and treating it as such is what turns a
+        # fail-closed gate into one that passes on doubt. Nothing downstream
+        # re-checks: the next steps sign and publish.
+        if [[ "${payload_flags}" == *'?'* ]]; then
+            printf '%s\n' "${verify_output}" >&2
+            fail "RPM verification could not check the payload for ${pkg}"
         fi
     done <<<"${verify_output}"
 }
