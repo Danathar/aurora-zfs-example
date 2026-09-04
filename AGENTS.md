@@ -36,9 +36,11 @@ gh api repos/{owner}/{repo}/issues/<N>/reactions \
   --jq '.[] | "\(.content) by \(.user.login)"'
 ```
 
-A 👍 from `chatgpt-codex-connector[bot]` means it reviewed and found nothing.
-Reporting that as "no review appeared" throws away the one clean signal it
-gives.
+The reaction has two values and they are not the same verdict. 👍 means it
+reviewed and found nothing — reporting that as "no review appeared" throws away
+the one clean signal it gives. 👀 means it has *accepted* the work and is still
+doing it; it appears within seconds of an `@codex review` comment and says
+nothing about the outcome. Treat 👀 as "keep waiting", never as approval.
 
 **Pushing a fix does not re-trigger it.** A review is bound to the commit it
 read, and the bot only reviews on three events: the PR being opened, a draft
@@ -53,7 +55,7 @@ gh pr comment <N> --body "@codex review"
 ```
 
 **Do not block on it.** Give it a couple of minutes, and if neither a review nor
-a 👍 has appeared, proceed and say so. An empty `/issues/<N>/comments` is not
+a 👍 has appeared, proceed and say so (a lone 👀 is not an answer). An empty `/issues/<N>/comments` is not
 evidence the bot stayed silent — check the three endpoints above. Never sit in a
 polling loop waiting for it.
 
