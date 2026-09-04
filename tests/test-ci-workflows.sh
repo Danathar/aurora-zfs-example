@@ -56,6 +56,16 @@
 # safe form and the injectable form look identical in review, so the difference
 # has to be checked rather than remembered. See section 6.
 #
+# That section is written inside out, and the reason is worth reading before
+# changing it. Its first version found the shell and checked it for
+# expressions, which made every step the parser failed to recognise a step it
+# silently skipped -- and review found six such spellings, one at a time, each
+# leaving the assertion green. Enumerating YAML spellings is not a race this
+# file can win. So it now finds the *expressions*, which is a lexical question,
+# and requires each to be somewhere it provably cannot become shell; what cannot
+# be placed fails. The unthought-of spelling lands in the failing bucket by
+# default rather than the passing one.
+#
 # The YAML is read with an indentation-anchored parser rather than a real one:
 # CONTRIBUTING.md asks for a conversation before adding a dependency, and the
 # structure needed here is shallow. The risk of hand-parsing is silent
@@ -63,6 +73,12 @@
 # and an assertion over nothing passes. So every extraction is checked for
 # emptiness first and fails loudly, and each parser helper is exercised against
 # a fixture with a known answer before it is trusted against the real files.
+#
+# Section 6 goes one step further, because it is the one guarding a security
+# property. Its classifier must account for exactly as many `${{` openers as a
+# plain `grep -oF` finds in the same file. That counter understands no YAML at
+# all, so a parser that read past part of a file cannot hide it: the failure
+# stops being a silent pass and becomes an arithmetic disagreement.
 
 set -uo pipefail
 
@@ -178,102 +194,181 @@ job_block() {
     ' "${file}"
 }
 
-# run_block_lines <file>
+# workflow_expressions <file>
 #
-# Prints "<line-number>:<content>" for every line of shell a step actually
-# runs: the body of each block `run: |`, and each single-line `run:` scalar.
+# Prints "<line><TAB><verdict><TAB><count><TAB><content>" for every line
+# carrying a ${{ ... }} expression, where <count> is how many openers the line
+# holds and <verdict> is one of:
 #
-# Two things it has to get right. It only looks inside a `steps:` block, because
-# `run` is an ordinary name elsewhere -- ai-fix.yml declares a job *output*
-# called `run`, which is a value, not a script. And a body is delimited by the
-# column of the `run:` key itself rather than by the line's leading whitespace,
-# so a sibling key still ends it when the step is written as `- run: |`, where
-# the dash sits left of the key. Getting that wrong swallows the following
-# `env:` block -- which is exactly where the values this section wants to see
-# are supposed to live.
-run_block_lines() {
+#   shell    the expression is inside a run: script -- an injection site
+#   value    it is a YAML value in a mapping that is not run: -- safe
+#   unknown  neither could be established
+#
+# The direction matters more than the mechanics, and it is the opposite of what
+# this section did for its first six revisions. That version found the shell and
+# checked it for expressions, so a step it could not recognise was a step it
+# never examined, and the assertion went green over it. Six such spellings were
+# found in review, one at a time: a comment after a block indicator, a comment
+# after `steps:`, a quoted `run` key, a flow scalar continued onto a second
+# line, a flow-mapping step, and a file named .yaml. Patching each one cannot
+# terminate, because the set of YAML spellings is not something this file can
+# enumerate in advance.
+#
+# So this finds the *expressions* -- which is a lexical question, not a YAML one
+# -- and requires each to be somewhere it provably cannot become shell. What the
+# classifier cannot place is `unknown`, and unknown fails. A spelling nobody has
+# thought of now lands in the failing bucket by default instead of the passing
+# one, which is the property the previous design could not have at any level of
+# effort.
+#
+# Two consequences worth stating, because they are what make the class closed
+# rather than merely narrowed:
+#
+#   * Block scalars are tracked by their key name, whatever the key is, so a
+#     run: body is recognised without knowing anything about `steps:`. Removing
+#     the `steps:` rule entirely still catches every case above -- verified.
+#     `steps:` now decides one thing only: whether a bare `run: ${{ ... }}` is a
+#     step or a job output, and ai-fix.yml declares an output named `run`.
+#   * Inside a block scalar nothing is interpreted as structure. A heredoc line
+#     such as `name: ${{ github.actor }}` inside a run: body is shell, and is
+#     classified by the block it is in rather than by how it looks.
+workflow_expressions() {
     local file=$1
     awk '
-        # Blank lines belong to a block scalar whatever their indentation, and
-        # carry no structure outside one.
+        # Blank lines carry no expression, and a blank inside a block scalar
+        # does not end it.
         /^[[:space:]]*$/ { next }
 
-        { match($0, /^[[:space:]]*/); ws = RLENGTH }
+        {
+            match($0, /^[[:space:]]*/)
+            ws = RLENGTH
+            # Counting the opener is deliberate: an expression may be written
+            # across lines, but `${{` is one token on one line, and this count
+            # is reconciled against a plain grep below.
+            n = split($0, _parts, /\$[{][{]/) - 1
+        }
 
-        # Close an open value first: anything at or left of the run: key ends
-        # it. This one rule covers both shapes a value can take, which is why
-        # they are not parsed separately below -- a block scalar body and a
-        # flow scalar continued onto further lines are delimited identically.
-        in_run && ws <= run_indent { in_run = 0 }
-        in_run { print FNR ":" $0; next }
+        # --- inside a block scalar: opaque text, judged by whose value it is --
+        in_block && ws <= block_indent { in_block = 0 }
+        in_block {
+            if (n > 0) print FNR "\t" (block_key == "run" ? "shell" : "value") "\t" n "\t" $0
+            next
+        }
 
-        # A trailing comment is legal after any key, here as much as after a
-        # block scalar indicator below. Anchoring this to end-of-line meant
-        # `steps: # build steps` never opened the block, and every run: in that
-        # job went unread.
+        # A YAML comment is not executed. Inside a block scalar this line is
+        # never reached, because there a leading # is shell.
+        /^[[:space:]]*#/ { if (n > 0) print FNR "\tvalue\t" n "\t" $0; next }
+
         /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ {
             steps_indent = ws
             in_steps = 1
             next
         }
         in_steps && ws <= steps_indent { in_steps = 0 }
-        !in_steps { next }
 
-        # Quoted keys are valid YAML and mean the same thing, so `- "run":` is
-        # a step GitHub executes. event_has_key above accepts them for the same
-        # reason this does: absence is the passing condition, and a spelling
-        # the parser cannot see reads as "no script here".
-        /^[[:space:]]*(- )?["\047]?run["\047]?[[:space:]]*:/ {
-            # The column of the key itself, not of the line, so a sibling key
-            # closes the value even in the `- run:` form where the dash sits
-            # left of the key.
-            prefix = $0
-            sub(/["\047]?run["\047]?[[:space:]]*:.*$/, "", prefix)
-            run_indent = length(prefix)
-            in_run = 1
+        {
+            key = ""
+            # A block mapping key: optional list dash, optional quotes, then a
+            # colon that must be followed by a space or end of line. That last
+            # part is what keeps `docker://host/image` from reading as a key.
+            if (match($0, /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:([[:space:]]|$)/)) {
+                head = substr($0, 1, RSTART + RLENGTH - 1)
 
-            rest = $0
-            sub(/^[[:space:]]*(- )?["\047]?run["\047]?[[:space:]]*:[[:space:]]*/, "", rest)
+                key = head
+                sub(/^[[:space:]]*(-[[:space:]]+)?/, "", key)
+                sub(/[[:space:]]*:[[:space:]]*$/, "", key)
+                gsub(/["\047]/, "", key)
 
-            # A block scalar indicator -- with its optional chomping and
-            # indentation modifiers, and an optional comment -- means the whole
-            # script is on the lines below, so this line holds no shell.
-            if (rest ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) next
+                # The column of the key itself, so a sibling key closes the
+                # block even in the `- run: |` form where the dash is left of it.
+                prefix = head
+                sub(/["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:[[:space:]]*$/, "", prefix)
+                key_indent = length(prefix)
 
-            # Otherwise the value starts here. It may also continue: YAML lets
-            # a quoted or plain scalar run onto the following lines as long as
-            # they are indented past the key, so `run: "echo safe` and an
-            # indented `&& echo ${{ ... }}"` are one command. Printing this line
-            # and stopping would record the safe half only; in_run above keeps
-            # reading until the indentation says the value ended.
-            print FNR ":" $0
+                value = substr($0, RSTART + RLENGTH)
+                sub(/^[[:space:]]*/, "", value)
+            }
+
+            if (key == "") {
+                if (n > 0) print FNR "\tunknown\t" n "\t" $0
+                next
+            }
+
+            # A block scalar indicator, with its chomping and indentation
+            # modifiers and an optional comment. Everything below belongs to
+            # this key.
+            if (value ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
+                in_block = 1
+                block_key = key
+                block_indent = key_indent
+                if (n > 0) print FNR "\t" (key == "run" ? "shell" : "value") "\t" n "\t" $0
+                next
+            }
+
+            if (n > 0) {
+                if (key != "run") {
+                    print FNR "\tvalue\t" n "\t" $0
+                } else if (!in_steps && value ~ /^["\047]?\$[{][{][^{}]*[}][}]["\047]?$/) {
+                    # Outside a steps: block, and nothing but the expression:
+                    # a job output, which is a value. A script that is nothing
+                    # but an expression is an injection, so this narrow shape is
+                    # the only run: key that reads as safe.
+                    print FNR "\tvalue\t" n "\t" $0
+                } else {
+                    print FNR "\tshell\t" n "\t" $0
+                }
+            }
             next
         }
     ' "${file}"
 }
 
-# flow_style_steps <file>
+# refused_yaml_forms <file>
 #
-# Prints "<line-number>:<content>" for step declarations written in YAML flow
-# style: `steps: [ ... ]`, or a `- { name: x, run: y }` item. Both are valid
-# YAML that GitHub executes, and run_block_lines cannot read either -- it finds
-# a run: key by its position at the start of a line, which a flow mapping never
-# gives it.
+# Prints "<line><TAB><reason><TAB><content>" for YAML this test declines to
+# reason about rather than guess at:
 #
-# The answer is to refuse the form, not to parse it. A flow-mapping parser means
-# nested braces, quoting, and line continuations, and being quietly wrong about
-# any of them puts the silent-skip hole straight back -- which is the whole
-# failure this section keeps being caught by. A step in block style is readable;
-# a step in flow style is a failure that names itself and its line.
-flow_style_steps() {
+#   flow-step   `steps: [ ... ]`, or a `- { name: x, run: y }` item
+#   anchor      a YAML anchor or alias
+#
+# Both are valid YAML, and both would let content reach a run: script by a route
+# the classifier above does not model -- a flow mapping puts the run key
+# mid-line, and an alias carries a value from somewhere else in the file
+# entirely. A parser for either means nested braces, quoting, merge keys and
+# line continuations, and being quietly wrong about any of them puts back
+# exactly the silent hole the classifier was rewritten to close.
+#
+# Refusing costs this repo nothing. Every step here is block style already, and
+# GitHub Actions does not support anchors at all, so the second is a form that
+# cannot appear in a working workflow. If either ever needs to be used, the
+# honest move is a real YAML parser and the dependency conversation
+# CONTRIBUTING.md asks for -- not a cleverer regex.
+refused_yaml_forms() {
     local file=$1
     awk '
         /^[[:space:]]*$/ { next }
         { match($0, /^[[:space:]]*/); ws = RLENGTH }
 
-        # `steps: [ ... ]` -- a flow sequence, which never opens a block below.
+        # Inside a block scalar everything is text: shell `&&`, a brace in a
+        # ${{ }} expression, a `*` glob. None of it is YAML structure.
+        in_block && ws <= block_indent { in_block = 0 }
+        in_block { next }
+        /^[[:space:]]*#/ { next }
+
+        match($0, /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:[[:space:]]*[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
+            prefix = $0
+            sub(/["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:.*$/, "", prefix)
+            block_indent = length(prefix)
+            in_block = 1
+            next
+        }
+
+        # An anchor definition or an alias reference, in a value position.
+        /(:|-)[[:space:]]+[&*][A-Za-z_]/ { print FNR "\tanchor\t" $0; next }
+
+        # `steps: [ ... ]` -- a flow sequence, which opens no block below.
         /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*\[/ {
-            print FNR ":" $0
+            print FNR "\tflow-step\t" $0
             next
         }
 
@@ -285,9 +380,9 @@ flow_style_steps() {
         in_steps && ws <= steps_indent { in_steps = 0 }
         !in_steps { next }
 
-        # `- { ... }` -- a flow mapping step. Anchored on the dash, so a `{` in
-        # shell inside a body, or in a ${{ }} expression, is not mistaken for one.
-        /^[[:space:]]*-[[:space:]]*\{/ { print FNR ":" $0 }
+        # `- { ... }` -- a flow mapping step. Anchored on the dash so a brace in
+        # shell, or in a ${{ }}, is not mistaken for one.
+        /^[[:space:]]*-[[:space:]]*\{/ { print FNR "\tflow-step\t" $0 }
     ' "${file}"
 }
 
@@ -332,27 +427,41 @@ jobs:
     steps:
       - name: Block scalar
         run: |
-          echo in-the-body
+          echo in-the-body "${{ github.actor }}"
         env:
-          NOT_THE_BODY: yes
+          NOT_THE_BODY: ${{ github.actor }}
       - name: Block scalar with a comment after the indicator
         run: |- # valid YAML, and easy to parse past
-          echo commented-indicator-body
+          echo commented-indicator "${{ github.actor }}"
         env:
           STILL_NOT_THE_BODY: yes
       - run: |
-          echo dash-form-body
+          echo dash-form-body "${{ github.actor }}"
         env:
           ALSO_NOT_THE_BODY: yes
-      - "run": echo quoted-key-script
+      - "run": echo quoted-key-script "${{ github.actor }}"
       - name: A flow scalar continued onto a second line
-        run: "echo first-half
-          && echo second-half"
+        run: "echo first-half ${{ github.actor }}
+          && echo second-half ${{ github.actor }}"
         env:
           NOT_THE_CONTINUATION: yes
   fourth:
     steps:
-      - { name: Flow mapping, run: echo flow-mapping-script }
+      - { name: Flow mapping, run: 'echo flow-mapping-script ${{ github.actor }}' }
+  fifth:
+    # a-comment-not-a-script ${{ github.actor }}
+    steps:
+      - name: A heredoc whose lines look like YAML keys
+        run: |
+          cat > cfg.yml <<'EOF'
+          heredoc-key: ${{ github.actor }}
+          EOF
+      - name: A folded scalar
+        run: >
+          echo folded-body ${{ github.actor }}
+  sixth: &an_anchor
+    steps:
+      - run: echo anchored
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -368,38 +477,44 @@ assert_not_contains "parser stops at the next job" \
 assert_contains "parser reads the second job" \
     "$(job_block "${fixture}" second)" "needs: first"
 
-runs=$(run_block_lines "${fixture}")
-assert_contains "parser reads a block run: body" "${runs}" "echo in-the-body"
-assert_contains "parser reads a single-line run:" "${runs}" "./first-marker.sh"
-assert_contains "parser reads a dash-form run: body" "${runs}" "echo dash-form-body"
-assert_not_contains "parser stops at the sibling env: after a block run:" \
-    "${runs}" "NOT_THE_BODY"
-assert_not_contains "and after a dash-form run:, where the body outdents past the dash" \
-    "${runs}" "ALSO_NOT_THE_BODY"
-assert_not_contains "parser ignores a job output that happens to be named run" \
-    "${runs}" "steps.somewhere.outputs.run"
-assert_contains "parser reads a body whose indicator carries a comment" \
-    "${runs}" "echo commented-indicator-body"
-assert_not_contains "and still stops at that step's env:" \
-    "${runs}" "STILL_NOT_THE_BODY"
-assert_contains "parser reads a quoted run key, which GitHub runs just the same" \
-    "${runs}" "echo quoted-key-script"
-assert_contains "parser reads the first line of a flow scalar" \
-    "${runs}" "echo first-half"
-assert_contains "and its continuation, which is part of the same command" \
-    "${runs}" "echo second-half"
-assert_not_contains "but not the env: that follows it" \
-    "${runs}" "NOT_THE_CONTINUATION"
+# The classifier, against a fixture holding every shape review has turned up.
+# Each is asserted by verdict, so a future change that quietly reclassifies one
+# as safe fails here rather than in production.
+verdict_for() {
+    workflow_expressions "${fixture}" | awk -F'\t' -v want="$1" '$4 ~ want { print $2; exit }'
+}
 
-# The refused form, asserted in both directions: the extractor genuinely cannot
-# read it, and the detector genuinely finds it. If run_block_lines ever learns
-# to read flow mappings, the first assertion fails and says to drop the refusal.
-assert_not_contains "the extractor cannot read a flow-mapping step" \
-    "${runs}" "echo flow-mapping-script"
-assert_contains "so the detector finds it instead" \
-    "$(flow_style_steps "${fixture}")" "run: echo flow-mapping-script"
-assert_eq "and finds nothing in block-style steps" \
-    "" "$(flow_style_steps "${fixture}" | grep -v flow-mapping || true)"
+assert_eq "an expression in a run: body is shell" "shell" "$(verdict_for in-the-body)"
+assert_eq "a body whose indicator carries a comment is still shell" \
+    "shell" "$(verdict_for commented-indicator)"
+assert_eq "a dash-form body is shell" "shell" "$(verdict_for dash-form-body)"
+assert_eq "a quoted run key is shell" "shell" "$(verdict_for quoted-key-script)"
+assert_eq "the first line of a flow scalar is shell" "shell" "$(verdict_for first-half)"
+assert_eq "its continuation is not silently dropped" "unknown" "$(verdict_for second-half)"
+assert_eq "a heredoc line shaped like a YAML key is still shell" \
+    "shell" "$(verdict_for heredoc-key)"
+assert_eq "a folded run: scalar is shell" "shell" "$(verdict_for folded-body)"
+
+assert_eq "a step's env: value is a value, not shell" "value" "$(verdict_for NOT_THE_BODY)"
+assert_eq "a job output named run is a value, not a script" \
+    "value" "$(verdict_for somewhere.outputs.run)"
+assert_eq "a YAML comment is not executed" "value" "$(verdict_for a-comment-not-a-script)"
+
+# The property that ends the class: the classifier must account for every
+# opener a plain grep can find. An expression it fails to place cannot be
+# skipped in silence, because a dumber counter knows how many there are.
+fixture_seen=$(workflow_expressions "${fixture}" | awk -F'\t' '{s+=$3} END{print s+0}')
+# shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
+fixture_actual=$(grep -oF '${{' "${fixture}" | wc -l)
+assert_eq "the classifier accounts for every expression in the fixture" \
+    "${fixture_actual}" "${fixture_seen}"
+
+assert_contains "refused forms include the flow-mapping step" \
+    "$(refused_yaml_forms "${fixture}")" "flow-mapping-script"
+assert_contains "and a YAML anchor" \
+    "$(refused_yaml_forms "${fixture}")" "anchor"
+assert_eq "and nothing in ordinary block-style steps" "" \
+    "$(refused_yaml_forms "${fixture}" | grep -vE 'flow-mapping-script|anchor' || true)"
 
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
@@ -679,110 +794,118 @@ else
     fi
 fi
 
-# --- 6. no step splices an Actions expression into the shell it runs --------
+# --- 6. every Actions expression is somewhere it cannot become shell -------
 #
-# ${{ ... }} is substituted at YAML-render time, before bash ever starts, so a
-# value containing shell metacharacters arrives as syntax rather than as data.
-# Passing it through `env:` and reading "${VAR}" instead hands bash a string.
+# ${{ ... }} is substituted at YAML-render time, before bash starts, so a value
+# containing shell metacharacters arrives as syntax rather than as data. Passing
+# it through `env:` and reading "${VAR}" hands bash a string instead.
 #
 # Nothing in this repo's expressions is attacker-controlled today: build.yml's
-# tags come from `type=raw` values the workflow itself defines, and the digests
-# come from a push it just performed. The assertion is about what a later change
-# costs. Extending a `tags:` input with a branch name or a PR title is a
-# one-line edit far away from the loop that consumes it, and in a spliced loop
-# that edit is a command-injection vector nobody reviewing the tags block would
-# see. In an env-threaded loop it is a string with odd characters in it.
+# tags come from `type=raw` values the workflow defines, and the digests come
+# from a push it just performed. The assertion is about what a later change
+# costs. Extending a `tags:` input with a branch name or a PR title is a one-line
+# edit far from the loop that consumes it, and in a spliced loop that edit is a
+# command injection nobody reviewing the tags block would see.
 #
-# Checked across every workflow rather than the ones that had the problem, so a
-# new file starts out held to the same rule.
+# On why this is written inside out, see workflow_expressions. In short: the
+# first version of this section looked for the shell and checked it, so every
+# spelling of a step it failed to recognise was a step it silently skipped, and
+# review found six of those one at a time. This version looks for the
+# expressions -- a lexical question -- and demands that each be provably
+# harmless. Unknown fails.
+#
+# Three assertions, and the third is the one that closes the class:
+#
+#   * no expression sits in a run: script
+#   * none is unclassifiable
+#   * the classifier accounted for exactly as many openers as `grep -oF '${{'`
+#     found, per file
+#
+# That last one cannot be satisfied by a parser that skipped something, because
+# the counter it is checked against understands no YAML at all. Under-reading is
+# no longer a silent pass; it is an arithmetic disagreement.
 
-expression_offenders=()
-unread_workflows=()
-flow_style=()
-run_lines_seen=0
+in_shell=()
+unclassified=()
+miscounted=()
+refused=()
+expressions_seen=0
+
 while IFS= read -r workflow; do
-    file_lines=0
-    while IFS= read -r hit; do
-        [[ -z "${hit}" ]] && continue
-        run_lines_seen=$((run_lines_seen + 1))
-        file_lines=$((file_lines + 1))
-        # shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
-        [[ "${hit}" == *'${{'* ]] || continue
-        expression_offenders+=("$(basename "${workflow}"):${hit}")
-    done < <(run_block_lines "${workflow}")
+    wf=$(basename "${workflow}")
 
-    # Per file, not just in total. Every evasion found in review so far worked
-    # the same way: one file became unreadable to the parser -- an unrecognized
-    # `steps:` spelling, a quoted key, a form it could not classify -- while the
-    # other workflows kept the global count comfortably above its floor and the
-    # assertion below passed over a file it had never read. A file that looks
-    # like it has a run: key and yields no shell is that failure, and it is now
-    # loud.
-    #
-    # The detector is deliberately dumber than the parser -- a line-anchored
-    # grep, no structure -- because a guard that shared the parser's idea of
-    # what a step looks like would share its blind spots and confirm them.
-    #
-    # It errs toward firing. A job *output* named `run` matches it (ai-fix.yml
-    # declares one), so a workflow that had such an output and no run steps at
-    # all would trip this with nothing wrong. That is a red build asking a human
-    # to look at one named file, which is the safe direction for a guard in
-    # front of a security assertion; the fix then is to look, not to loosen it.
-    # A workflow whose steps are all `uses:` is not affected -- labeler.yml has
-    # no run: key at all and is silently and correctly skipped.
-    if [[ "${file_lines}" -eq 0 ]] &&
-        grep -qE '^[[:space:]]*(- )?["'"'"']?run["'"'"']?[[:space:]]*:' "${workflow}"; then
-        unread_workflows+=("$(basename "${workflow}")")
+    seen=0
+    while IFS=$'\t' read -r lineno verdict count content; do
+        [[ -z "${lineno}" ]] && continue
+        seen=$((seen + count))
+        case "${verdict}" in
+            shell) in_shell+=("${wf}:${lineno}:${content}") ;;
+            unknown) unclassified+=("${wf}:${lineno}:${content}") ;;
+            value) ;;
+            # A verdict this loop does not know is not a verdict it can trust.
+            *) unclassified+=("${wf}:${lineno}: unrecognised verdict '${verdict}'") ;;
+        esac
+    done < <(workflow_expressions "${workflow}")
+
+    # shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
+    actual=$(grep -oF '${{' "${workflow}" | wc -l)
+    expressions_seen=$((expressions_seen + actual))
+    if [[ "${seen}" -ne "${actual}" ]]; then
+        miscounted+=("${wf}: classified ${seen} of ${actual}")
     fi
 
-    # A step written in flow style is unreadable to the extractor by
-    # construction, and the guard above does not see it either: its detector is
-    # line-anchored, and a flow mapping puts the run: key mid-line. Reported on
-    # its own rather than parsed -- see flow_style_steps.
-    while IFS= read -r flow; do
-        [[ -z "${flow}" ]] && continue
-        flow_style+=("$(basename "${workflow}"):${flow}")
-    done < <(flow_style_steps "${workflow}")
+    while IFS= read -r form; do
+        [[ -z "${form}" ]] && continue
+        refused+=("${wf}:${form}")
+    done < <(refused_yaml_forms "${workflow}")
 # GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
 # leave the other's expressions unchecked while Actions still ran the file.
 done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 \
     \( -name '*.yml' -o -name '*.yaml' \) -type f | sort)
 
-# An extractor that read nothing would satisfy the assertion below without
-# having looked at a single line of shell.
-if [[ "${run_lines_seen}" -lt 100 ]]; then
-    _fail "the run: extractor read the workflows" \
-        "only ${run_lines_seen} line(s) of shell found across .github/workflows/" \
-        "the assertion below would pass on an empty read; fix the parser first"
+# Nothing below means anything if the workflows hold no expressions at all.
+if [[ "${expressions_seen}" -gt 0 ]]; then
+    _pass "the workflows carry ${expressions_seen} Actions expression(s) to account for"
 else
-    _pass "the run: extractor read the workflows (${run_lines_seen} lines of shell)"
+    _fail "the workflows carry Actions expressions to account for" \
+        "found none, so every assertion below is vacuous; check the file glob"
 fi
 
-if [[ "${#flow_style[@]}" -eq 0 ]]; then
-    _pass "every step is written in block style, where the parser can read it"
+if [[ "${#miscounted[@]}" -eq 0 ]]; then
+    _pass "every expression was accounted for by the classifier"
 else
-    _fail "every step is written in block style, where the parser can read it" \
-        "flow-style steps are valid YAML that GitHub runs, and this test cannot" \
-        "read them -- so an expression spliced into one would go unchecked." \
-        "Rewrite these in block style:" \
-        "${flow_style[@]}"
+    _fail "every expression was accounted for by the classifier" \
+        "a plain grep found openers the classifier did not place, which means" \
+        "it read past part of the file -- the exact failure this design exists" \
+        "to make impossible to miss:" \
+        "${miscounted[@]}"
 fi
 
-if [[ "${#unread_workflows[@]}" -eq 0 ]]; then
-    _pass "every workflow containing a run: key yielded shell to the parser"
+if [[ "${#in_shell[@]}" -eq 0 ]]; then
+    _pass "no Actions expression is spliced into a run: script"
 else
-    _fail "every workflow containing a run: key yielded shell to the parser" \
-        "the parser read nothing from: ${unread_workflows[*]}" \
-        "its steps are invisible to the assertion below, which would pass" \
-        "on the strength of the other workflows alone"
-fi
-
-if [[ "${#expression_offenders[@]}" -eq 0 ]]; then
-    _pass "no run: body splices an Actions expression"
-else
-    _fail "no run: body splices an Actions expression" \
+    _fail "no Actions expression is spliced into a run: script" \
         "pass the value through the step's env: and read it as \"\${VAR}\" instead" \
-        "${expression_offenders[@]}"
+        "${in_shell[@]}"
+fi
+
+if [[ "${#unclassified[@]}" -eq 0 ]]; then
+    _pass "every expression sits somewhere the classifier can vouch for"
+else
+    _fail "every expression sits somewhere the classifier can vouch for" \
+        "these are not known to be safe, which is not the same as being known" \
+        "to be unsafe -- put the value in a plain key: value or a block scalar," \
+        "or extend workflow_expressions to recognise the form:" \
+        "${unclassified[@]}"
+fi
+
+if [[ "${#refused[@]}" -eq 0 ]]; then
+    _pass "no workflow uses a YAML form this test refuses to reason about"
+else
+    _fail "no workflow uses a YAML form this test refuses to reason about" \
+        "flow-style steps and YAML anchors can route a value into a run: script" \
+        "by a path the classifier does not model; see refused_yaml_forms:" \
+        "${refused[@]}"
 fi
 
 finish
