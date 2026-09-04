@@ -56,5 +56,6 @@
       }
     ]
   },
+  "_note_podman_ps": "`podman ps` is allowed with the mutating `--sync` form knowingly included. `--sync` forces Podman's stored state to be rebuilt from what the OCI runtime reports, so it is a write, not a read. It is allowed anyway: it reconciles bookkeeping with ground truth and cannot create, start, stop or delete a container or image, and the destructive podman verbs are gated separately under `ask` and `deny`. There is no narrower rule that helps -- permission patterns match by prefix and flags may appear in any order, so `Bash(podman ps -a:*)` would admit `podman ps -a --sync` just as readily. The choice is therefore between allowing this form and prompting on every `podman ps`, and the read is far more common. Raised by chatgpt-codex-connector on #93 and verified against podman 5.8.4's man page.",
   "_note_gh_api": "gh api is intentionally in `ask`, never `allow`. Permission rules match by command prefix, and `gh api` switches to POST as soon as -f/-F is present and honours -X for any method. An allow rule such as Bash(gh api repos/:*) would therefore approve mutations, including the workflow-dispatch endpoint that `gh workflow run` is listed under `ask` to gate."
 }
