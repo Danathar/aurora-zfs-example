@@ -55,6 +55,18 @@ indentation-anchored parser rather than adding a dependency, and exercises that
 parser against a fixture first, so a reformat it cannot follow fails the suite
 instead of passing over an empty extraction.
 
+What runs that test matters as much as what it asserts, and this is the part a
+first draft got wrong. A `pull_request` run executes the *head* branch's copy of
+a workflow file, so a pull request deleting the `Shell tests` job from
+`build.yml` would be checked by the `build.yml` that no longer has it — the
+suite that would have gone red is the suite that no longer runs. So
+`coverage-gate.yml` triggers on `.github/workflows/**` too, and the test asserts
+that it does: any workflow edit is checked by a workflow the pull request did
+not touch, and the two files police each other. Disabling the gate now takes an
+edit to both in one pull request. Making that impossible rather than merely
+conspicuous needs a required status check in branch protection, which no file in
+the tree can assert.
+
 ## End-to-end
 
 `tests/e2e/run-e2e.sh` builds the real image with podman and checks the real
@@ -132,10 +144,14 @@ the image build.
 
 `build.yml` sets `paths-ignore` for `README.md` and `docs/**` though, so a
 change touching only those starts no run there.
-`.github/workflows/coverage-gate.yml` triggers on exactly that complement and
-runs the same suite, so a docs-only change is no longer the one kind of change
-nothing verifies. One workflow or the other runs the suite; a change touching
-both docs and code trips both.
+`.github/workflows/coverage-gate.yml` triggers on that complement and runs the
+same suite, so a docs-only change is no longer the one kind of change nothing
+verifies. One workflow or the other runs the suite; a change touching both docs
+and code trips both.
+
+`coverage-gate.yml` also triggers on `.github/workflows/**`, which is the
+deliberate exception to "one or the other": it is what lets it check a change to
+`build.yml`, which `build.yml` cannot check for itself.
 
 All four of those facts — both workflows running the suite with `shellcheck`
 installed first, `needs: tests`, and every path one workflow ignores being

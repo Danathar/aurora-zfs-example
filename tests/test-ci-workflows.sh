@@ -33,6 +33,23 @@
 # call that trade deliberate, so the assertion is a superset check rather than
 # equality.
 #
+# What runs this test matters as much as what it asserts. A `pull_request` run
+# executes the *head* branch's copy of a workflow file — measured on this repo
+# and written up in docs/SECURITY-AI.md — so a pull request that deletes the
+# `Shell tests` job from build.yml is checked by the build.yml that no longer
+# has it. The suite that would have gone red is the suite that no longer runs,
+# and build_push proceeds. A test living inside the workflow it polices cannot
+# close that on its own.
+#
+# So coverage-gate.yml triggers on '.github/workflows/**' as well, and this file
+# asserts that it does. Any workflow edit is then checked by a workflow the pull
+# request did not touch, and the two files police each other: build.yml runs the
+# suite on a change to coverage-gate.yml, and coverage-gate.yml runs it on a
+# change to build.yml. Disabling the gate takes an edit to both in one pull
+# request rather than one line in one file. The last step — making that
+# impossible rather than merely conspicuous — is a required status check in
+# branch protection, which no file in the tree can assert.
+#
 # The YAML is read with an indentation-anchored parser rather than a real one:
 # CONTRIBUTING.md asks for a conversation before adding a dependency, and the
 # structure needed here is shallow. The risk of hand-parsing is silent
@@ -222,6 +239,21 @@ for event in pull_request push; do
     ignored=$(event_paths "${BUILD_WF}" "${event}" paths-ignore)
     covered=$(event_paths "${COVERAGE_WF}" "${event}" paths)
 
+    # GitHub evaluates path patterns in order, and a later '!' pattern removes
+    # paths an earlier one matched. The membership check below cannot reason
+    # about that: 'docs/**' followed by '!docs/private/**' would still satisfy
+    # it while a docs/private-only change is claimed by neither workflow. So a
+    # negation is refused outright rather than silently mis-read. If one is ever
+    # wanted, this test has to evaluate the ordered set instead.
+    if negated=$(grep -- '^!' <<<"${ignored}${covered:+$'\n'}${covered}"); then
+        _fail "${event}: path filters use no '!' negation" \
+            "found: ${negated//$'\n'/, }" \
+            "order-dependent negation makes the membership check below unsound;" \
+            "teach this test to evaluate the ordered pattern set before adding one"
+        continue
+    fi
+    _pass "${event}: path filters use no '!' negation"
+
     if [[ -z "${ignored}" ]]; then
         _fail "build.yml declares paths-ignore on ${event}" \
             "extracted nothing; either the filter was removed (in which case the" \
@@ -237,6 +269,19 @@ for event in pull_request push; do
         continue
     fi
     _pass "coverage-gate.yml declares paths on ${event}"
+
+    # The trigger that makes the two workflows check each other. Without it a
+    # pull request editing only build.yml is checked by the build.yml it edited
+    # — a pull_request run executes the head branch's copy — so the assertions
+    # above would never execute on the change that breaks them.
+    if grep -qxF '.github/workflows/**' <<<"${covered}"; then
+        _pass "${event}: coverage-gate.yml triggers on workflow changes"
+    else
+        _fail "${event}: coverage-gate.yml triggers on workflow changes" \
+            "without '.github/workflows/**' in its ${event} paths, a pull request" \
+            "that removes the suite from build.yml runs only the build.yml it just" \
+            "edited, and nothing in this file executes"
+    fi
 
     while IFS= read -r path; do
         [[ -z "${path}" ]] && continue
