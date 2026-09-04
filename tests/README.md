@@ -21,6 +21,7 @@ present and skipped when not.
 | `test-coverage.sh`          | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason        |
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
 | `test-ci-workflows.sh`      | CI still runs this suite, and neither workflow's path filter leaves a gap                  |
+| `test-auto-qa-tuning.sh`    | every workflow job is bounded by a timeout, and declared to the auto-QA manifest at the number the YAML actually says |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -73,6 +74,20 @@ is not the only way a workflow stops running: point `build.yml`'s
 `main`, while `coverage-gate.yml` keeps running and every path assertion still
 passes. Merge that and a source-only pull request runs no suite at all — the
 same hole, reached by a different door.
+
+`test-auto-qa-tuning.sh` holds `.github/auto-qa-tuning.json` against the
+workflow files. That manifest is what `auto-qa.yml` samples against, and it has
+two failure modes that are quiet in the same way: a job absent from it is never
+sampled and nothing goes red, and a `timeout_minutes` that no longer matches the
+YAML makes every verdict wrong in a direction the workflow cannot see — it reads
+the numbers there, not the YAML. `status-badges.yml` shipped for months with no
+`timeout-minutes` at all and no entry in the manifest, so its `badges` job — the
+one holding `contents: write` — could have held a runner for six hours on a hung
+`skopeo`. The test asserts every job declares a timeout, appears in exactly one
+of `jobs` or `untracked`, and, when tracked, at the number the workflow really
+declares. `untracked` is the `UNCOVERED` idiom from `test-coverage.sh`: not
+watching a job is a legitimate answer, but it has to be an answer, with the
+reason next to it.
 
 ## End-to-end
 
