@@ -208,17 +208,30 @@ run_block_lines() {
         in_steps && ws <= steps_indent { in_steps = 0 }
         !in_steps { next }
 
-        /^[[:space:]]*(- )?run:[[:space:]]*[|>][-+0-9]*[[:space:]]*$/ {
-            prefix = $0
-            sub(/run:.*$/, "", prefix)
-            run_indent = length(prefix)
-            in_run = 1
+        # Every run: key is classified, and none is skipped. Splitting this
+        # into two patterns and letting a line match neither is how a body goes
+        # missing without anything saying so -- `run: | # why` is valid YAML
+        # that an end-anchored block pattern rejects, and the assertion below
+        # then passes over a script it never read.
+        /^[[:space:]]*(- )?run:/ {
+            rest = $0
+            sub(/^[[:space:]]*(- )?run:[[:space:]]*/, "", rest)
+
+            # A block scalar indicator, with its optional chomping/indentation
+            # modifiers and an optional comment, opens a body.
+            if (rest ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
+                prefix = $0
+                sub(/run:.*$/, "", prefix)
+                run_indent = length(prefix)
+                in_run = 1
+                next
+            }
+
+            # Anything else is a single-line script, which can splice just as
+            # readily as a block one.
+            print FNR ":" $0
             next
         }
-
-        # A single-line run: is its own whole script, and can splice just as
-        # readily as a block one.
-        /^[[:space:]]*(- )?run:[[:space:]]*[^|>[:space:]]/ { print FNR ":" $0; next }
     ' "${file}"
 }
 
@@ -266,6 +279,11 @@ jobs:
           echo in-the-body
         env:
           NOT_THE_BODY: yes
+      - name: Block scalar with a comment after the indicator
+        run: |- # valid YAML, and easy to parse past
+          echo commented-indicator-body
+        env:
+          STILL_NOT_THE_BODY: yes
       - run: |
           echo dash-form-body
         env:
@@ -295,6 +313,10 @@ assert_not_contains "and after a dash-form run:, where the body outdents past th
     "${runs}" "ALSO_NOT_THE_BODY"
 assert_not_contains "parser ignores a job output that happens to be named run" \
     "${runs}" "steps.somewhere.outputs.run"
+assert_contains "parser reads a body whose indicator carries a comment" \
+    "${runs}" "echo commented-indicator-body"
+assert_not_contains "and still stops at that step's env:" \
+    "${runs}" "STILL_NOT_THE_BODY"
 
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
@@ -601,7 +623,10 @@ while IFS= read -r workflow; do
         [[ "${hit}" == *'${{'* ]] || continue
         expression_offenders+=("$(basename "${workflow}"):${hit}")
     done < <(run_block_lines "${workflow}")
-done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 -name '*.yml' -type f | sort)
+# GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
+# leave the other's expressions unchecked while Actions still ran the file.
+done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 \
+    \( -name '*.yml' -o -name '*.yaml' \) -type f | sort)
 
 # An extractor that read nothing would satisfy the assertion below without
 # having looked at a single line of shell.
