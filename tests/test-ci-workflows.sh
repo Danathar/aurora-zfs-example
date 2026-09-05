@@ -50,35 +50,10 @@
 # impossible rather than merely conspicuous — is a required status check in
 # branch protection, which no file in the tree can assert.
 #
-# One assertion here is about a different property than the rest: that no step
-# splices a ${{ ... }} expression into the shell it runs. That is not a gating
-# question, it is the same anti-rot question in the security direction -- the
-# safe form and the injectable form look identical in review, so the difference
-# has to be checked rather than remembered. See section 6.
-#
-# That section is written inside out, and the reason is worth reading before
-# changing it. Its first version found the shell and checked it for
-# expressions, which made every step the parser failed to recognise a step it
-# silently skipped -- and review found six such spellings, one at a time, each
-# leaving the assertion green. Enumerating YAML spellings is not a race this
-# file can win. So it now finds the *expressions*, which is a lexical question,
-# and requires each to be somewhere it provably cannot become shell; what cannot
-# be placed fails. The unthought-of spelling lands in the failing bucket by
-# default rather than the passing one.
-#
-# The YAML is read with an indentation-anchored parser rather than a real one:
-# CONTRIBUTING.md asks for a conversation before adding a dependency, and the
-# structure needed here is shallow. The risk of hand-parsing is silent
-# under-extraction — a reformat the parser cannot follow yields an empty result,
-# and an assertion over nothing passes. So every extraction is checked for
-# emptiness first and fails loudly, and each parser helper is exercised against
-# a fixture with a known answer before it is trusted against the real files.
-#
-# Section 6 goes one step further, because it is the one guarding a security
-# property. Its classifier must account for exactly as many `${{` openers as a
-# plain `grep -oF` finds in the same file. That counter understands no YAML at
-# all, so a parser that read past part of a file cannot hide it: the failure
-# stops being a silent pass and becomes an arithmetic disagreement.
+# The topology checks below use indentation-anchored extractors, with known
+# fixture answers and nonempty-result assertions. The expression check in
+# section 6 uses PyYAML: quoted continuations, aliases and escaped characters
+# must have the same meaning here that they have when Actions reads the file.
 
 set -uo pipefail
 
@@ -92,6 +67,18 @@ source "${TEST_DIR}/lib/assert.sh"
 BUILD_WF="${REPO_ROOT}/.github/workflows/build.yml"
 COVERAGE_WF="${REPO_ROOT}/.github/workflows/coverage-gate.yml"
 BADGES_WF="${REPO_ROOT}/.github/workflows/status-badges.yml"
+NIGHTLY_WF="${REPO_ROOT}/.github/workflows/nightly-compliance.yml"
+WORKFLOW_PYTHON="${WORKFLOW_PYTHON:-python3}"
+
+# This check guards a security invariant; a missing parser must fail, including
+# when this test is invoked directly instead of through run-tests.sh.
+if ! "${WORKFLOW_PYTHON}" -c 'import yaml' >/dev/null 2>&1; then
+    _fail "the workflow checker requires Python 3 with PyYAML" \
+        "install python3-yaml (Debian/Ubuntu) or python3-pyyaml (Fedora)," \
+        "or install PyYAML in the interpreter selected by WORKFLOW_PYTHON"
+    finish
+    exit 1
+fi
 
 # --- parser -----------------------------------------------------------------
 #
@@ -194,240 +181,6 @@ job_block() {
     ' "${file}"
 }
 
-# workflow_expressions <file>
-#
-# Prints "<line><TAB><verdict><TAB><count><TAB><content>" for every line
-# carrying a ${{ ... }} expression, where <count> is how many openers the line
-# holds and <verdict> is one of:
-#
-#   shell    the expression is executed -- a run: script, or a shell: key,
-#            which GitHub renders into the command that launches the script
-#   value    it is a YAML value in a mapping that is not run: -- safe
-#   unknown  neither could be established
-#
-# The direction matters more than the mechanics, and it is the opposite of what
-# this section did for its first six revisions. That version found the shell and
-# checked it for expressions, so a step it could not recognise was a step it
-# never examined, and the assertion went green over it. Six such spellings were
-# found in review, one at a time: a comment after a block indicator, a comment
-# after `steps:`, a quoted `run` key, a flow scalar continued onto a second
-# line, a flow-mapping step, and a file named .yaml. Patching each one cannot
-# terminate, because the set of YAML spellings is not something this file can
-# enumerate in advance.
-#
-# So this finds the *expressions* -- which is a lexical question, not a YAML one
-# -- and requires each to be somewhere it provably cannot become shell. What the
-# classifier cannot place is `unknown`, and unknown fails. A spelling nobody has
-# thought of now lands in the failing bucket by default instead of the passing
-# one, which is the property the previous design could not have at any level of
-# effort.
-#
-# Two consequences worth stating, because they are what make the class closed
-# rather than merely narrowed:
-#
-#   * Block scalars are tracked by their key name, whatever the key is, so a
-#     run: body is recognised without knowing anything about `steps:`. Removing
-#     the `steps:` rule entirely still catches every case above -- verified.
-#     `steps:` now decides one thing only: whether a bare `run: ${{ ... }}` is a
-#     step or a job output, and ai-fix.yml declares an output named `run`.
-#   * Inside a block scalar nothing is interpreted as structure. A heredoc line
-#     such as `name: ${{ github.actor }}` inside a run: body is shell, and is
-#     classified by the block it is in rather than by how it looks.
-workflow_expressions() {
-    local file=$1
-    awk '
-        # Blank lines carry no expression, and a blank inside a block scalar
-        # does not end it.
-        /^[[:space:]]*$/ { next }
-
-        {
-            match($0, /^[[:space:]]*/)
-            ws = RLENGTH
-            # Counting the opener is deliberate: an expression may be written
-            # across lines, but `${{` is one token on one line, and this count
-            # is reconciled against a plain grep below.
-            n = split($0, _parts, /\$[{][{]/) - 1
-        }
-
-        # --- inside a block scalar: opaque text, judged by whose value it is --
-        in_block && ws <= block_indent { in_block = 0 }
-        in_block {
-            if (n > 0) print FNR "\t" (block_key == "run" ? "shell" : "value") "\t" n "\t" $0
-            next
-        }
-
-        # A YAML comment is not executed. Inside a block scalar this line is
-        # never reached, because there a leading # is shell.
-        /^[[:space:]]*#/ { if (n > 0) print FNR "\tvalue\t" n "\t" $0; next }
-
-        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ {
-            steps_indent = ws
-            in_steps = 1
-            next
-        }
-        in_steps && ws <= steps_indent { in_steps = 0 }
-
-        {
-            key = ""
-            # A block mapping key: optional list dash, optional quotes, then a
-            # colon that must be followed by a space or end of line. That last
-            # part is what keeps `docker://host/image` from reading as a key.
-            if (match($0, /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:([[:space:]]|$)/)) {
-                head = substr($0, 1, RSTART + RLENGTH - 1)
-
-                key = head
-                sub(/^[[:space:]]*(-[[:space:]]+)?/, "", key)
-                sub(/[[:space:]]*:[[:space:]]*$/, "", key)
-                gsub(/["\047]/, "", key)
-
-                # The column of the key itself, so a sibling key closes the
-                # block even in the `- run: |` form where the dash is left of it.
-                prefix = head
-                sub(/["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:[[:space:]]*$/, "", prefix)
-                key_indent = length(prefix)
-
-                value = substr($0, RSTART + RLENGTH)
-                sub(/^[[:space:]]*/, "", value)
-            }
-
-            if (key == "") {
-                if (n > 0) print FNR "\tunknown\t" n "\t" $0
-                next
-            }
-
-            # A block scalar indicator, with its chomping and indentation
-            # modifiers and an optional comment. Everything below belongs to
-            # this key.
-            if (value ~ /^[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
-                in_block = 1
-                block_key = key
-                block_indent = key_indent
-                if (n > 0) print FNR "\t" (key == "run" ? "shell" : "value") "\t" n "\t" $0
-                next
-            }
-
-            # `run` is the script. `shell` is executed too: GitHub renders it
-            # into the command line that launches the temporary script, so
-            # `shell: ${{ ... }} {0}` runs before the body does. Vouching for
-            # every key that is not `run` missed that.
-            executable = (key == "run" || key == "shell")
-
-            if (n > 0) {
-                if (!executable) {
-                    print FNR "\tvalue\t" n "\t" $0
-                } else if (key == "run" && !in_steps && value ~ /^["\047]?\$[{][{][^{}]*[}][}]["\047]?$/) {
-                    # Outside a steps: block, and nothing but the expression:
-                    # a job output, which is a value. A script that is nothing
-                    # but an expression is an injection, so this narrow shape is
-                    # the only run: key that reads as safe.
-                    print FNR "\tvalue\t" n "\t" $0
-                } else {
-                    print FNR "\tshell\t" n "\t" $0
-                }
-            }
-
-            # A non-empty value is a scalar, and a scalar does not have to end
-            # on its own line: YAML folds every following line indented past
-            # the key into it, quoted or not. So
-            #
-            #     run: "echo start
-            #       name: ${{ github.event.issue.title }}"
-            #
-            # is one command, and reading that second line as a fresh `name:`
-            # key vouched for an expression that is spliced straight into shell.
-            # The continuation is delimited exactly like a block scalar body, so
-            # it is tracked as one -- which is also why plain (unquoted) folds
-            # are covered without a separate rule for quoting.
-            #
-            # An empty value opens a nested mapping or sequence instead, whose
-            # children are keys in their own right and must keep being read as
-            # such. A value that is only a comment is empty.
-            value_body = value
-            sub(/^#.*$/, "", value_body)
-            if (value_body != "") {
-                in_block = 1
-                block_key = key
-                block_indent = key_indent
-            }
-            next
-        }
-    ' "${file}"
-}
-
-# refused_yaml_forms <file>
-#
-# Prints "<line><TAB><reason><TAB><content>" for YAML this test declines to
-# reason about rather than guess at:
-#
-#   flow-step   `steps: [ ... ]`, or a `- { name: x, run: y }` item
-#   anchor      a YAML anchor or alias
-#
-# Both are valid YAML, and both would let content reach a run: script by a route
-# the classifier above does not model -- a flow mapping puts the run key
-# mid-line, and an alias carries a value from somewhere else in the file
-# entirely. A parser for either means nested braces, quoting, merge keys and
-# line continuations, and being quietly wrong about any of them puts back
-# exactly the silent hole the classifier was rewritten to close.
-#
-# Refusing costs this repo nothing. Every step here is block style already, and
-# GitHub Actions does not support anchors at all, so the second is a form that
-# cannot appear in a working workflow. If either ever needs to be used, the
-# honest move is a real YAML parser and the dependency conversation
-# CONTRIBUTING.md asks for -- not a cleverer regex.
-refused_yaml_forms() {
-    local file=$1
-    awk '
-        /^[[:space:]]*$/ { next }
-        { match($0, /^[[:space:]]*/); ws = RLENGTH }
-
-        # Inside a block scalar everything is text: shell `&&`, a brace in a
-        # ${{ }} expression, a `*` glob. None of it is YAML structure.
-        in_block && ws <= block_indent { in_block = 0 }
-        in_block { next }
-        /^[[:space:]]*#/ { next }
-
-        match($0, /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:[[:space:]]*[|>][-+0-9]*[[:space:]]*(#.*)?$/) {
-            prefix = $0
-            sub(/["\047]?[A-Za-z_][A-Za-z0-9_.-]*["\047]?[[:space:]]*:.*$/, "", prefix)
-            block_indent = length(prefix)
-            in_block = 1
-            next
-        }
-
-        # An anchor definition or an alias reference, in a value position.
-        #
-        # The name is matched as "not whitespace, and not a second & or *"
-        # rather than as an identifier: YAML anchor names are not identifiers,
-        # and `&1` / `*1` are valid. Accepting only [A-Za-z_] let
-        # `SCRIPT: &1 ${{ ... }}` in env: pass as an ordinary value while
-        # `run: *1` pulled it in as the script -- found in review, and the
-        # reason this class is refused wholesale rather than reasoned about.
-        #
-        # The two exclusions are what keep real files quiet: `&&` in a
-        # single-line shell condition, and a `**` glob in a paths: list. Both
-        # would otherwise read as a sigil.
-        /(:|-)[[:space:]]+[&*][^[:space:]&*]/ { print FNR "\tanchor\t" $0; next }
-
-        # `steps: [ ... ]` -- a flow sequence, which opens no block below.
-        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*\[/ {
-            print FNR "\tflow-step\t" $0
-            next
-        }
-
-        /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ {
-            steps_indent = ws
-            in_steps = 1
-            next
-        }
-        in_steps && ws <= steps_indent { in_steps = 0 }
-        !in_steps { next }
-
-        # `- { ... }` -- a flow mapping step. Anchored on the dash so a brace in
-        # shell, or in a ${{ }}, is not mistaken for one.
-        /^[[:space:]]*-[[:space:]]*\{/ { print FNR "\tflow-step\t" $0 }
-    ' "${file}"
-}
-
 # --- the parser is tested before it is trusted ------------------------------
 #
 # An extractor that silently returns nothing would make every assertion below
@@ -463,63 +216,6 @@ jobs:
     steps:
       - name: Marker
         run: ./second-marker.sh
-  third:
-    outputs:
-      run: ${{ steps.somewhere.outputs.run }}
-    steps:
-      - name: Block scalar
-        run: |
-          echo in-the-body "${{ github.actor }}"
-        env:
-          NOT_THE_BODY: ${{ github.actor }}
-      - name: Block scalar with a comment after the indicator
-        run: |- # valid YAML, and easy to parse past
-          echo commented-indicator "${{ github.actor }}"
-        env:
-          STILL_NOT_THE_BODY: yes
-      - run: |
-          echo dash-form-body "${{ github.actor }}"
-        env:
-          ALSO_NOT_THE_BODY: yes
-      - "run": echo quoted-key-script "${{ github.actor }}"
-      - name: A flow scalar continued onto a second line
-        run: "echo first-half ${{ github.actor }}
-          && echo second-half ${{ github.actor }}"
-        env:
-          NOT_THE_CONTINUATION: yes
-  fourth:
-    steps:
-      - { name: Flow mapping, run: 'echo flow-mapping-script ${{ github.actor }}' }
-  fifth:
-    # a-comment-not-a-script ${{ github.actor }}
-    steps:
-      - name: A heredoc whose lines look like YAML keys
-        run: |
-          cat > cfg.yml <<'EOF'
-          heredoc-key: ${{ github.actor }}
-          EOF
-      - name: A folded scalar
-        run: >
-          echo folded-body ${{ github.actor }}
-  sixth: &an_anchor
-    steps:
-      - run: echo anchored
-  seventh:
-    env:
-      NUMERIC_ANCHOR: &1 ${{ github.actor }}
-    steps:
-      - run: *1
-  eighth:
-    steps:
-      - name: A quoted scalar folded onto a mapping-shaped line
-        run: "echo start
-          folded-onto-a-key: ${{ github.actor }}"
-      - name: A plain scalar folded the same way
-        run: echo start
-          plain-folded-key: ${{ github.actor }}
-      - name: An expression in the shell key
-        shell: ${{ github.actor }} {0}
-        run: echo hi
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -535,74 +231,16 @@ assert_not_contains "parser stops at the next job" \
 assert_contains "parser reads the second job" \
     "$(job_block "${fixture}" second)" "needs: first"
 
-# The classifier, against a fixture holding every shape review has turned up.
-# Each is asserted by verdict, so a future change that quietly reclassifies one
-# as safe fails here rather than in production.
-verdict_for() {
-    workflow_expressions "${fixture}" | awk -F'\t' -v want="$1" '$4 ~ want { print $2; exit }'
-}
-
-assert_eq "an expression in a run: body is shell" "shell" "$(verdict_for in-the-body)"
-assert_eq "a body whose indicator carries a comment is still shell" \
-    "shell" "$(verdict_for commented-indicator)"
-assert_eq "a dash-form body is shell" "shell" "$(verdict_for dash-form-body)"
-assert_eq "a quoted run key is shell" "shell" "$(verdict_for quoted-key-script)"
-assert_eq "the first line of a flow scalar is shell" "shell" "$(verdict_for first-half)"
-# Tracking scalar continuations upgraded this from "unknown" to "shell": the
-# line is not merely unplaceable, it is part of the command.
-assert_eq "its continuation is read as part of the same command" \
-    "shell" "$(verdict_for second-half)"
-assert_eq "a heredoc line shaped like a YAML key is still shell" \
-    "shell" "$(verdict_for heredoc-key)"
-assert_eq "a folded run: scalar is shell" "shell" "$(verdict_for folded-body)"
-# YAML folds any line indented past the key into the same scalar, so a
-# continuation that happens to look like `key: value` is still the command.
-assert_eq "a quoted scalar folded onto a mapping-shaped line is shell" \
-    "shell" "$(verdict_for folded-onto-a-key)"
-assert_eq "and an unquoted one, which needs no separate rule" \
-    "shell" "$(verdict_for plain-folded-key)"
-# GitHub renders shell: into the command that launches the script, so an
-# expression there runs before the body does.
-assert_eq "an expression in the shell: key is executable, not data" \
-    "shell" "$(verdict_for 'shell: ')"
-
-assert_eq "a step's env: value is a value, not shell" "value" "$(verdict_for NOT_THE_BODY)"
-assert_eq "a job output named run is a value, not a script" \
-    "value" "$(verdict_for somewhere.outputs.run)"
-assert_eq "a YAML comment is not executed" "value" "$(verdict_for a-comment-not-a-script)"
-
-# The property that ends the class: the classifier must account for every
-# opener a plain grep can find. An expression it fails to place cannot be
-# skipped in silence, because a dumber counter knows how many there are.
-fixture_seen=$(workflow_expressions "${fixture}" | awk -F'\t' '{s+=$3} END{print s+0}')
-# shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
-fixture_actual=$(grep -oF '${{' "${fixture}" | wc -l)
-assert_eq "the classifier accounts for every expression in the fixture" \
-    "${fixture_actual}" "${fixture_seen}"
-
-assert_contains "refused forms include the flow-mapping step" \
-    "$(refused_yaml_forms "${fixture}")" "flow-mapping-script"
-assert_contains "and a YAML anchor" \
-    "$(refused_yaml_forms "${fixture}")" "anchor"
-# A numeric anchor name is valid YAML and is not an identifier. Accepting only
-# [A-Za-z_] let &1 / *1 route an env: value into a run: script unseen.
-assert_contains "including one whose name is a number" \
-    "$(refused_yaml_forms "${fixture}")" "NUMERIC_ANCHOR"
-assert_contains "and the alias that pulls it into a script" \
-    "$(refused_yaml_forms "${fixture}")" "run: *1"
-assert_eq "and nothing in ordinary block-style steps" "" \
-    "$(refused_yaml_forms "${fixture}" | grep -vE 'flow-mapping-script|anchor' || true)"
-
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
 check_runs_suite() {
-    local label=$1 file=$2
+    local label=$1 file=$2 job=${3:-tests}
     local block
-    block=$(job_block "${file}" tests)
+    block=$(job_block "${file}" "${job}")
 
     if [[ -z "${block}" ]]; then
         _fail "${label} has a tests job" \
-            "no 'tests:' job found under jobs: in ${file#"${REPO_ROOT}"/}" \
+            "no '${job}:' job found under jobs: in ${file#"${REPO_ROOT}"/}" \
             "if the job was renamed, this test must be updated with it"
         return
     fi
@@ -627,6 +265,10 @@ check_runs_suite() {
             "an argument runs only part of it"
     fi
     assert_contains "${label} installs shellcheck" "${block}" "apt-get install -y shellcheck"
+    assert_contains "${label} installs PyYAML for the workflow checker" \
+        "${block}" "apt-get install -y shellcheck python3-yaml"
+    assert_contains "${label} uses the Python where apt installs PyYAML" \
+        "${block}" "WORKFLOW_PYTHON: /usr/bin/python3"
 
     # Running the suite is not the same as being gated by it. `continue-on-error`
     # leaves a red suite in a green job, and an `if:` on the step or the job can
@@ -661,6 +303,7 @@ check_runs_suite() {
 
 check_runs_suite "build.yml" "${BUILD_WF}"
 check_runs_suite "coverage-gate.yml" "${COVERAGE_WF}"
+check_runs_suite "nightly-compliance.yml" "${NIGHTLY_WF}" suite
 
 # --- 2. a red suite still blocks the image build ----------------------------
 
@@ -871,118 +514,23 @@ else
     fi
 fi
 
-# --- 6. every Actions expression is somewhere it cannot become shell -------
+# --- 6. parsed run/shell values contain no Actions expressions --------------
 #
-# ${{ ... }} is substituted at YAML-render time, before bash starts, so a value
-# containing shell metacharacters arrives as syntax rather than as data. Passing
-# it through `env:` and reading "${VAR}" hands bash a string instead.
-#
-# Nothing in this repo's expressions is attacker-controlled today: build.yml's
-# tags come from `type=raw` values the workflow defines, and the digests come
-# from a push it just performed. The assertion is about what a later change
-# costs. Extending a `tags:` input with a branch name or a PR title is a one-line
-# edit far from the loop that consumes it, and in a spliced loop that edit is a
-# command injection nobody reviewing the tags block would see.
-#
-# On why this is written inside out, see workflow_expressions. In short: the
-# first version of this section looked for the shell and checked it, so every
-# spelling of a step it failed to recognise was a step it silently skipped, and
-# review found six of those one at a time. This version looks for the
-# expressions -- a lexical question -- and demands that each be provably
-# harmless. Unknown fails.
-#
-# Three assertions, and the third is the one that closes the class:
-#
-#   * no expression sits in a run: script
-#   * none is unclassifiable
-#   * the classifier accounted for exactly as many openers as `grep -oF '${{'`
-#     found, per file
-#
-# That last one cannot be satisfied by a parser that skipped something, because
-# the counter it is checked against understands no YAML at all. Under-reading is
-# no longer a silent pass; it is an arithmetic disagreement.
+# Expressions are expanded before the script starts. Read decoded YAML scalar
+# values: a raw-text opener count misses, for example, "\x24{{ ... }}".
+# The Python regressions exercise the same checker the real workflow scan uses.
 
-in_shell=()
-unclassified=()
-miscounted=()
-refused=()
-expressions_seen=0
-
-while IFS= read -r workflow; do
-    wf=$(basename "${workflow}")
-
-    seen=0
-    while IFS=$'\t' read -r lineno verdict count content; do
-        [[ -z "${lineno}" ]] && continue
-        seen=$((seen + count))
-        case "${verdict}" in
-            shell) in_shell+=("${wf}:${lineno}:${content}") ;;
-            unknown) unclassified+=("${wf}:${lineno}:${content}") ;;
-            value) ;;
-            # A verdict this loop does not know is not a verdict it can trust.
-            *) unclassified+=("${wf}:${lineno}: unrecognised verdict '${verdict}'") ;;
-        esac
-    done < <(workflow_expressions "${workflow}")
-
-    # shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
-    actual=$(grep -oF '${{' "${workflow}" | wc -l)
-    expressions_seen=$((expressions_seen + actual))
-    if [[ "${seen}" -ne "${actual}" ]]; then
-        miscounted+=("${wf}: classified ${seen} of ${actual}")
-    fi
-
-    while IFS= read -r form; do
-        [[ -z "${form}" ]] && continue
-        refused+=("${wf}:${form}")
-    done < <(refused_yaml_forms "${workflow}")
-# GitHub loads .yaml as readily as .yml; a scan that saw only one of them would
-# leave the other's expressions unchecked while Actions still ran the file.
-done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 \
-    \( -name '*.yml' -o -name '*.yaml' \) -type f | sort)
-
-# Nothing below means anything if the workflows hold no expressions at all.
-if [[ "${expressions_seen}" -gt 0 ]]; then
-    _pass "the workflows carry ${expressions_seen} Actions expression(s) to account for"
+if "${WORKFLOW_PYTHON}" -B "${TEST_DIR}/test_workflow_expressions.py"; then
+    _pass "the workflow expression checker passes its regression cases"
 else
-    _fail "the workflows carry Actions expressions to account for" \
-        "found none, so every assertion below is vacuous; check the file glob"
+    _fail "the workflow expression checker passes its regression cases"
 fi
 
-if [[ "${#miscounted[@]}" -eq 0 ]]; then
-    _pass "every expression was accounted for by the classifier"
+if expression_check=$("${WORKFLOW_PYTHON}" -B \
+    "${TEST_DIR}/lib/workflow_expressions.py" "${REPO_ROOT}/.github/workflows" 2>&1); then
+    _pass "${expression_check}"
 else
-    _fail "every expression was accounted for by the classifier" \
-        "a plain grep found openers the classifier did not place, which means" \
-        "it read past part of the file -- the exact failure this design exists" \
-        "to make impossible to miss:" \
-        "${miscounted[@]}"
-fi
-
-if [[ "${#in_shell[@]}" -eq 0 ]]; then
-    _pass "no Actions expression is spliced into a run: script"
-else
-    _fail "no Actions expression is spliced into a run: script" \
-        "pass the value through the step's env: and read it as \"\${VAR}\" instead" \
-        "${in_shell[@]}"
-fi
-
-if [[ "${#unclassified[@]}" -eq 0 ]]; then
-    _pass "every expression sits somewhere the classifier can vouch for"
-else
-    _fail "every expression sits somewhere the classifier can vouch for" \
-        "these are not known to be safe, which is not the same as being known" \
-        "to be unsafe -- put the value in a plain key: value or a block scalar," \
-        "or extend workflow_expressions to recognise the form:" \
-        "${unclassified[@]}"
-fi
-
-if [[ "${#refused[@]}" -eq 0 ]]; then
-    _pass "no workflow uses a YAML form this test refuses to reason about"
-else
-    _fail "no workflow uses a YAML form this test refuses to reason about" \
-        "flow-style steps and YAML anchors can route a value into a run: script" \
-        "by a path the classifier does not model; see refused_yaml_forms:" \
-        "${refused[@]}"
+    _fail "workflow run/shell values contain no Actions expressions" "${expression_check}"
 fi
 
 finish

@@ -39,7 +39,12 @@ Pin **both** inputs or neither; a half-pin is the one move guaranteed to break.
 ./tests/run-tests.sh test-write-badges  # one file
 ```
 
-Plain bash, no framework to install. Needs bash 4+, `jq`, GNU `date` and `sed`.
+The suite needs bash 4+, `jq`, GNU `date`, `sed`, and Python 3 with PyYAML.
+Install PyYAML with `sudo apt-get install python3-yaml` on Debian/Ubuntu or
+`sudo dnf install python3-pyyaml` on Fedora. The workflow expression check uses
+`python3` by default; set `WORKFLOW_PYTHON` to use a different interpreter, such
+as one from a virtual environment with PyYAML installed. A missing parser fails
+the suite. CI installs PyYAML explicitly and uses `/usr/bin/python3`.
 
 **Install `shellcheck` before you trust a green run.** `test-shell-syntax.sh`
 skips its shellcheck pass when the tool is absent, so the suite stays usable

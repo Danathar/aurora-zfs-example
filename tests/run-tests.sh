@@ -5,8 +5,8 @@
 #   ./tests/run-tests.sh                   # all tests
 #   ./tests/run-tests.sh test-write-badges # one test, by name or path
 #
-# Requirements: bash 4+, jq, coreutils date. No test framework to install; the
-# scripts under test are shell, so the tests are shell.
+# Requirements: bash 4+, jq, coreutils date, sed; the workflow expression check
+# also requires Python 3 with PyYAML. No third-party test framework is needed.
 
 set -uo pipefail
 
