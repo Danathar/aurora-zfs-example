@@ -162,6 +162,18 @@ so sourcing it defines `require_glob`, `verify_rpm_payload`,
 `ldd` or `find`, and asserts the guard in both directions: sourcing runs no
 check, executing still runs `main`.
 
+Sourcing is also what makes `main`'s own call sequence readable. Each stage is
+replaced by a recorder, so the test reads the order without an RPM database,
+module tree or initramfs underneath — and that order is a contract rather than
+an arrangement. `verify_rpm_payload`'s comment argues that its unparseable-line
+branch is unreachable *because* `check_zfs_packages` demands `kmod-zfs` earlier
+in `main`; move `check_rpm_payloads` ahead of it and the comment silently
+becomes false while the build stays green. A dropped stage is quiet in the same
+way. So the assertions are the exact six-stage sequence, `all checks passed`
+printed only after the last of them, and — by failing a stage in the middle,
+where "did not run" and "was never called" are distinguishable — that a failure
+stops the stages behind it.
+
 `test-post-check-checks.sh` goes one level up, to the `check_*` stages. Two of
 the six decide purely from what `rpm` and `find` report, so they run on any
 host: `check_kernel_tree` and `check_zfs_packages`. What is worth testing there
@@ -181,8 +193,12 @@ paths under `/usr/lib` and require `zfs`/`zpool`/`zdb`/`zed` on `PATH`. On any
 host that is not the finished image they fail before reaching the logic worth
 checking — the `spl`/`zfs` vermagic comparison, the `modules-load.d` content
 match and the `lsinitrd` listing — so covering them needs an injectable root
-prefix in the script itself. `check_rpm_payloads` is one call to
-`verify_rpm_payload`, which `test-post-check.sh` already covers.
+prefix in the script itself.
+
+`check_rpm_payloads` needs no such prefix — it is one call to
+`verify_rpm_payload`, and which package it names is the whole of it, so
+`test-post-check.sh` covers it by stubbing that helper and asserting the
+argument. Verifying the wrong package, or none, would otherwise still exit 0.
 
 The other `build_files/*.sh` scripts still run their work at the top level, so
 `source` executes the whole file. Their happy path is exercised by the `Build
