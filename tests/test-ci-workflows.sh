@@ -200,7 +200,8 @@ job_block() {
 # carrying a ${{ ... }} expression, where <count> is how many openers the line
 # holds and <verdict> is one of:
 #
-#   shell    the expression is inside a run: script -- an injection site
+#   shell    the expression is executed -- a run: script, or a shell: key,
+#            which GitHub renders into the command that launches the script
 #   value    it is a YAML value in a mapping that is not run: -- safe
 #   unknown  neither could be established
 #
@@ -305,10 +306,16 @@ workflow_expressions() {
                 next
             }
 
+            # `run` is the script. `shell` is executed too: GitHub renders it
+            # into the command line that launches the temporary script, so
+            # `shell: ${{ ... }} {0}` runs before the body does. Vouching for
+            # every key that is not `run` missed that.
+            executable = (key == "run" || key == "shell")
+
             if (n > 0) {
-                if (key != "run") {
+                if (!executable) {
                     print FNR "\tvalue\t" n "\t" $0
-                } else if (!in_steps && value ~ /^["\047]?\$[{][{][^{}]*[}][}]["\047]?$/) {
+                } else if (key == "run" && !in_steps && value ~ /^["\047]?\$[{][{][^{}]*[}][}]["\047]?$/) {
                     # Outside a steps: block, and nothing but the expression:
                     # a job output, which is a value. A script that is nothing
                     # but an expression is an injection, so this narrow shape is
@@ -317,6 +324,30 @@ workflow_expressions() {
                 } else {
                     print FNR "\tshell\t" n "\t" $0
                 }
+            }
+
+            # A non-empty value is a scalar, and a scalar does not have to end
+            # on its own line: YAML folds every following line indented past
+            # the key into it, quoted or not. So
+            #
+            #     run: "echo start
+            #       name: ${{ github.event.issue.title }}"
+            #
+            # is one command, and reading that second line as a fresh `name:`
+            # key vouched for an expression that is spliced straight into shell.
+            # The continuation is delimited exactly like a block scalar body, so
+            # it is tracked as one -- which is also why plain (unquoted) folds
+            # are covered without a separate rule for quoting.
+            #
+            # An empty value opens a nested mapping or sequence instead, whose
+            # children are keys in their own right and must keep being read as
+            # such. A value that is only a comment is empty.
+            value_body = value
+            sub(/^#.*$/, "", value_body)
+            if (value_body != "") {
+                in_block = 1
+                block_key = key
+                block_indent = key_indent
             }
             next
         }
@@ -478,6 +509,17 @@ jobs:
       NUMERIC_ANCHOR: &1 ${{ github.actor }}
     steps:
       - run: *1
+  eighth:
+    steps:
+      - name: A quoted scalar folded onto a mapping-shaped line
+        run: "echo start
+          folded-onto-a-key: ${{ github.actor }}"
+      - name: A plain scalar folded the same way
+        run: echo start
+          plain-folded-key: ${{ github.actor }}
+      - name: An expression in the shell key
+        shell: ${{ github.actor }} {0}
+        run: echo hi
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -506,10 +548,23 @@ assert_eq "a body whose indicator carries a comment is still shell" \
 assert_eq "a dash-form body is shell" "shell" "$(verdict_for dash-form-body)"
 assert_eq "a quoted run key is shell" "shell" "$(verdict_for quoted-key-script)"
 assert_eq "the first line of a flow scalar is shell" "shell" "$(verdict_for first-half)"
-assert_eq "its continuation is not silently dropped" "unknown" "$(verdict_for second-half)"
+# Tracking scalar continuations upgraded this from "unknown" to "shell": the
+# line is not merely unplaceable, it is part of the command.
+assert_eq "its continuation is read as part of the same command" \
+    "shell" "$(verdict_for second-half)"
 assert_eq "a heredoc line shaped like a YAML key is still shell" \
     "shell" "$(verdict_for heredoc-key)"
 assert_eq "a folded run: scalar is shell" "shell" "$(verdict_for folded-body)"
+# YAML folds any line indented past the key into the same scalar, so a
+# continuation that happens to look like `key: value` is still the command.
+assert_eq "a quoted scalar folded onto a mapping-shaped line is shell" \
+    "shell" "$(verdict_for folded-onto-a-key)"
+assert_eq "and an unquoted one, which needs no separate rule" \
+    "shell" "$(verdict_for plain-folded-key)"
+# GitHub renders shell: into the command that launches the script, so an
+# expression there runs before the body does.
+assert_eq "an expression in the shell: key is executable, not data" \
+    "shell" "$(verdict_for 'shell: ')"
 
 assert_eq "a step's env: value is a value, not shell" "value" "$(verdict_for NOT_THE_BODY)"
 assert_eq "a job output named run is a value, not a script" \
