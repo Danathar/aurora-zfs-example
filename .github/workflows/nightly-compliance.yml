@@ -157,9 +157,11 @@ jobs:
       # the repo tells people to trust.
       - name: Verify the published signature
         if: steps.latest.outputs.present == 'true'
+        env:
+          DIGEST: ${{ steps.latest.outputs.digest }}
         run: |
           set -euo pipefail
-          cosign verify --key cosign.pub "${IMAGE_REF}@${{ steps.latest.outputs.digest }}" > /dev/null
+          cosign verify --key cosign.pub "${IMAGE_REF}@${DIGEST}" > /dev/null
           echo "Signature verifies against cosign.pub"
 
       # build.yml asserts this at push time; this asserts it still holds. A tag
@@ -194,16 +196,20 @@ jobs:
 
       - name: Summarize
         if: always()
+        env:
+          PRESENT: ${{ steps.latest.outputs.present }}
+          DIGEST: ${{ steps.latest.outputs.digest }}
+          DATE_TAG: ${{ steps.latest.outputs.date_tag }}
         run: |
           {
             echo "### Nightly compliance"
             echo
-            if [ "${{ steps.latest.outputs.present }}" != "true" ]; then
+            if [ "${PRESENT}" != "true" ]; then
               echo "No published \`:latest\` to check."
             else
               echo "- image: \`${IMAGE_REF}:latest\`"
-              echo "- digest: \`${{ steps.latest.outputs.digest }}\`"
-              echo "- date tags checked: \`latest.${{ steps.latest.outputs.date_tag }}\`, \`${{ steps.latest.outputs.date_tag }}\`"
+              echo "- digest: \`${DIGEST}\`"
+              echo "- date tags checked: \`latest.${DATE_TAG}\`, \`${DATE_TAG}\`"
             fi
             echo
             echo "Post-rechunk image *contents* are not validated here; that is"
