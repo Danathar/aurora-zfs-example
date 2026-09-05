@@ -50,6 +50,12 @@
 # impossible rather than merely conspicuous — is a required status check in
 # branch protection, which no file in the tree can assert.
 #
+# One assertion here is about a different property than the rest: that no step
+# splices a ${{ ... }} expression into the shell it runs. That is not a gating
+# question, it is the same anti-rot question in the security direction -- the
+# safe form and the injectable form look identical in review, so the difference
+# has to be checked rather than remembered. See section 6.
+#
 # The YAML is read with an indentation-anchored parser rather than a real one:
 # CONTRIBUTING.md asks for a conversation before adding a dependency, and the
 # structure needed here is shallow. The risk of hand-parsing is silent
@@ -172,6 +178,50 @@ job_block() {
     ' "${file}"
 }
 
+# run_block_lines <file>
+#
+# Prints "<line-number>:<content>" for every line of shell a step actually
+# runs: the body of each block `run: |`, and each single-line `run:` scalar.
+#
+# Two things it has to get right. It only looks inside a `steps:` block, because
+# `run` is an ordinary name elsewhere -- ai-fix.yml declares a job *output*
+# called `run`, which is a value, not a script. And a body is delimited by the
+# column of the `run:` key itself rather than by the line's leading whitespace,
+# so a sibling key still ends it when the step is written as `- run: |`, where
+# the dash sits left of the key. Getting that wrong swallows the following
+# `env:` block -- which is exactly where the values this section wants to see
+# are supposed to live.
+run_block_lines() {
+    local file=$1
+    awk '
+        # Blank lines belong to a block scalar whatever their indentation, and
+        # carry no structure outside one.
+        /^[[:space:]]*$/ { next }
+
+        { match($0, /^[[:space:]]*/); ws = RLENGTH }
+
+        # Close an open body first: anything at or left of the run: key ends it.
+        in_run && ws <= run_indent { in_run = 0 }
+        in_run { print FNR ":" $0; next }
+
+        /^[[:space:]]*steps:[[:space:]]*$/ { steps_indent = ws; in_steps = 1; next }
+        in_steps && ws <= steps_indent { in_steps = 0 }
+        !in_steps { next }
+
+        /^[[:space:]]*(- )?run:[[:space:]]*[|>][-+0-9]*[[:space:]]*$/ {
+            prefix = $0
+            sub(/run:.*$/, "", prefix)
+            run_indent = length(prefix)
+            in_run = 1
+            next
+        }
+
+        # A single-line run: is its own whole script, and can splice just as
+        # readily as a block one.
+        /^[[:space:]]*(- )?run:[[:space:]]*[^|>[:space:]]/ { print FNR ":" $0; next }
+    ' "${file}"
+}
+
 # --- the parser is tested before it is trusted ------------------------------
 #
 # An extractor that silently returns nothing would make every assertion below
@@ -207,6 +257,19 @@ jobs:
     steps:
       - name: Marker
         run: ./second-marker.sh
+  third:
+    outputs:
+      run: ${{ steps.somewhere.outputs.run }}
+    steps:
+      - name: Block scalar
+        run: |
+          echo in-the-body
+        env:
+          NOT_THE_BODY: yes
+      - run: |
+          echo dash-form-body
+        env:
+          ALSO_NOT_THE_BODY: yes
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -221,6 +284,17 @@ assert_not_contains "parser stops at the next job" \
     "$(job_block "${fixture}" first)" "./second-marker.sh"
 assert_contains "parser reads the second job" \
     "$(job_block "${fixture}" second)" "needs: first"
+
+runs=$(run_block_lines "${fixture}")
+assert_contains "parser reads a block run: body" "${runs}" "echo in-the-body"
+assert_contains "parser reads a single-line run:" "${runs}" "./first-marker.sh"
+assert_contains "parser reads a dash-form run: body" "${runs}" "echo dash-form-body"
+assert_not_contains "parser stops at the sibling env: after a block run:" \
+    "${runs}" "NOT_THE_BODY"
+assert_not_contains "and after a dash-form run:, where the body outdents past the dash" \
+    "${runs}" "ALSO_NOT_THE_BODY"
+assert_not_contains "parser ignores a job output that happens to be named run" \
+    "${runs}" "steps.somewhere.outputs.run"
 
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
@@ -498,6 +572,53 @@ else
             "write-badges.sh on every pull request; a broadened condition also lets" \
             "a job with contents: write push to the status branch from a PR build"
     fi
+fi
+
+# --- 6. no step splices an Actions expression into the shell it runs --------
+#
+# ${{ ... }} is substituted at YAML-render time, before bash ever starts, so a
+# value containing shell metacharacters arrives as syntax rather than as data.
+# Passing it through `env:` and reading "${VAR}" instead hands bash a string.
+#
+# Nothing in this repo's expressions is attacker-controlled today: build.yml's
+# tags come from `type=raw` values the workflow itself defines, and the digests
+# come from a push it just performed. The assertion is about what a later change
+# costs. Extending a `tags:` input with a branch name or a PR title is a
+# one-line edit far away from the loop that consumes it, and in a spliced loop
+# that edit is a command-injection vector nobody reviewing the tags block would
+# see. In an env-threaded loop it is a string with odd characters in it.
+#
+# Checked across every workflow rather than the ones that had the problem, so a
+# new file starts out held to the same rule.
+
+expression_offenders=()
+run_lines_seen=0
+while IFS= read -r workflow; do
+    while IFS= read -r hit; do
+        [[ -z "${hit}" ]] && continue
+        run_lines_seen=$((run_lines_seen + 1))
+        # shellcheck disable=SC2016 # the literal Actions opener, not a shell expansion
+        [[ "${hit}" == *'${{'* ]] || continue
+        expression_offenders+=("$(basename "${workflow}"):${hit}")
+    done < <(run_block_lines "${workflow}")
+done < <(find "${REPO_ROOT}/.github/workflows" -maxdepth 1 -name '*.yml' -type f | sort)
+
+# An extractor that read nothing would satisfy the assertion below without
+# having looked at a single line of shell.
+if [[ "${run_lines_seen}" -lt 100 ]]; then
+    _fail "the run: extractor read the workflows" \
+        "only ${run_lines_seen} line(s) of shell found across .github/workflows/" \
+        "the assertion below would pass on an empty read; fix the parser first"
+else
+    _pass "the run: extractor read the workflows (${run_lines_seen} lines of shell)"
+fi
+
+if [[ "${#expression_offenders[@]}" -eq 0 ]]; then
+    _pass "no run: body splices an Actions expression"
+else
+    _fail "no run: body splices an Actions expression" \
+        "pass the value through the step's env: and read it as \"\${VAR}\" instead" \
+        "${expression_offenders[@]}"
 fi
 
 finish
