@@ -364,7 +364,18 @@ refused_yaml_forms() {
         }
 
         # An anchor definition or an alias reference, in a value position.
-        /(:|-)[[:space:]]+[&*][A-Za-z_]/ { print FNR "\tanchor\t" $0; next }
+        #
+        # The name is matched as "not whitespace, and not a second & or *"
+        # rather than as an identifier: YAML anchor names are not identifiers,
+        # and `&1` / `*1` are valid. Accepting only [A-Za-z_] let
+        # `SCRIPT: &1 ${{ ... }}` in env: pass as an ordinary value while
+        # `run: *1` pulled it in as the script -- found in review, and the
+        # reason this class is refused wholesale rather than reasoned about.
+        #
+        # The two exclusions are what keep real files quiet: `&&` in a
+        # single-line shell condition, and a `**` glob in a paths: list. Both
+        # would otherwise read as a sigil.
+        /(:|-)[[:space:]]+[&*][^[:space:]&*]/ { print FNR "\tanchor\t" $0; next }
 
         # `steps: [ ... ]` -- a flow sequence, which opens no block below.
         /^[[:space:]]*["\047]?steps["\047]?[[:space:]]*:[[:space:]]*\[/ {
@@ -462,6 +473,11 @@ jobs:
   sixth: &an_anchor
     steps:
       - run: echo anchored
+  seventh:
+    env:
+      NUMERIC_ANCHOR: &1 ${{ github.actor }}
+    steps:
+      - run: *1
 FIXTURE
 
 assert_eq "parser reads a two-item paths-ignore list" \
@@ -513,6 +529,12 @@ assert_contains "refused forms include the flow-mapping step" \
     "$(refused_yaml_forms "${fixture}")" "flow-mapping-script"
 assert_contains "and a YAML anchor" \
     "$(refused_yaml_forms "${fixture}")" "anchor"
+# A numeric anchor name is valid YAML and is not an identifier. Accepting only
+# [A-Za-z_] let &1 / *1 route an env: value into a run: script unseen.
+assert_contains "including one whose name is a number" \
+    "$(refused_yaml_forms "${fixture}")" "NUMERIC_ANCHOR"
+assert_contains "and the alias that pulls it into a script" \
+    "$(refused_yaml_forms "${fixture}")" "run: *1"
 assert_eq "and nothing in ordinary block-style steps" "" \
     "$(refused_yaml_forms "${fixture}" | grep -vE 'flow-mapping-script|anchor' || true)"
 
