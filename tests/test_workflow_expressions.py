@@ -65,6 +65,34 @@ class WorkflowExpressionsTest(unittest.TestCase):
                 self.assertNotIn("${{", source)
                 self.assert_executable(source, "jobs.check.steps[0].run")
 
+    def test_plain_scalars_are_command_text(self):
+        # Actions uses YAML 1.2 and converts scalar literals for string fields.
+        # PyYAML's inferred YAML 1.1 tag must not reject valid command text.
+        values = (
+            "yes", "Yes", "YES", "no", "No", "NO", "on", "On", "ON",
+            "off", "Off", "OFF", "y", "n", "2026-09-05", "12:34:56",
+            "true", "false", "0", "1.5", "null", "~", "",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                source = workflow("- run: " + value + "\n  shell: " + value)
+                source = "defaults: {run: {shell: " + value + "}}\n" + source
+                source = source.replace(
+                    "    steps:",
+                    "    defaults: {run: {shell: " + value + "}}\n    steps:",
+                )
+                self.assertEqual([], check_workflow(source))
+
+    def test_scalar_tags_do_not_hide_expressions(self):
+        # compose() retains explicit tags without constructing their values.
+        # Regardless of a tag, the decoded text must still be inspected.
+        for tag in ("str", "bool", "int", "float", "null", "timestamp"):
+            with self.subTest(tag=tag):
+                self.assert_executable(
+                    workflow("- run: !!" + tag + " " + EXPRESSION),
+                    "jobs.check.steps[0].run",
+                )
+
     def test_shell_scalar_spellings(self):
         for value in (
             "EXPR {0}", '"bash -c\n  EXPR -- {0}"',
@@ -166,7 +194,6 @@ class WorkflowExpressionsTest(unittest.TestCase):
             "empty steps": workflow("[]"),
             "scalar step": workflow("- nope"),
             "invalid run": workflow("- run: [echo, safe]"),
-            "null run": workflow("- run:"),
             "invalid shell": workflow("- run: echo safe\n  shell: {bash: true}"),
             "invalid defaults": "defaults: nope\n" + workflow("- run: echo safe"),
             "duplicate sink": workflow("- run: '" + EXPRESSION + "'\n  run: echo safe"),

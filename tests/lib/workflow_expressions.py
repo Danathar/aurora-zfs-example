@@ -82,8 +82,15 @@ def check_workflow(source, filename="workflow.yml"):
     findings = []
 
     def executable(node, path):
-        if not isinstance(node, ScalarNode) or node.tag != "tag:yaml.org,2002:str":
-            raise WorkflowError(f"{location(node)}: {path}: expected a string")
+        if not isinstance(node, ScalarNode):
+            raise WorkflowError(f"{location(node)}: {path}: expected a scalar")
+        # ScalarNode.value is decoded text even when SafeLoader's YAML 1.1
+        # resolver inferred bool (yes/on), timestamp, etc. Actions uses YAML
+        # 1.2 and its template reader also converts scalar literals for string
+        # fields. Inspect the text, not the inferred tag: conversion cannot
+        # create an expression in a boolean, number or null literal. Explicit
+        # tags cannot hide an opener either; validate_graph still rejects
+        # unsupported tags and collections are refused above.
         if "${{" in node.value:
             # For an alias, this location names the anchor's scalar while path
             # names the executable use. Never cache this check by node identity:

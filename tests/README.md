@@ -76,6 +76,14 @@ are supported, including a value defined as data and later used as a script.
 Diagnostics name both the consuming workflow path and the scalar's source
 location, which points to the definition for an alias.
 
+Executable scalars are checked as decoded text regardless of PyYAML's inferred
+tag. This avoids rejecting plain commands such as `yes` and `on`, which PyYAML
+tags as YAML 1.1 booleans but Actions reads as YAML 1.2 strings. Other scalar
+literals are also accepted in string fields by Actions' template reader.
+Mappings and sequences still fail, and a scalar's tag never exempts its text
+from the expression check. This does not validate whether a command exists or
+whether an empty script can execute successfully.
+
 This is an invariant over those executable fields, not a general Actions
 schema validator or a security audit of third-party action inputs, reusable
 workflows, composite actions, or how a script later uses its environment.
