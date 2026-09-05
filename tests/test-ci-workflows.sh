@@ -50,13 +50,10 @@
 # impossible rather than merely conspicuous — is a required status check in
 # branch protection, which no file in the tree can assert.
 #
-# The YAML is read with an indentation-anchored parser rather than a real one:
-# CONTRIBUTING.md asks for a conversation before adding a dependency, and the
-# structure needed here is shallow. The risk of hand-parsing is silent
-# under-extraction — a reformat the parser cannot follow yields an empty result,
-# and an assertion over nothing passes. So every extraction is checked for
-# emptiness first and fails loudly, and each parser helper is exercised against
-# a fixture with a known answer before it is trusted against the real files.
+# The topology checks below use indentation-anchored extractors, with known
+# fixture answers and nonempty-result assertions. The expression check in
+# section 6 uses PyYAML: quoted continuations, aliases and escaped characters
+# must have the same meaning here that they have when Actions reads the file.
 
 set -uo pipefail
 
@@ -70,6 +67,18 @@ source "${TEST_DIR}/lib/assert.sh"
 BUILD_WF="${REPO_ROOT}/.github/workflows/build.yml"
 COVERAGE_WF="${REPO_ROOT}/.github/workflows/coverage-gate.yml"
 BADGES_WF="${REPO_ROOT}/.github/workflows/status-badges.yml"
+NIGHTLY_WF="${REPO_ROOT}/.github/workflows/nightly-compliance.yml"
+WORKFLOW_PYTHON="${WORKFLOW_PYTHON:-python3}"
+
+# This check guards a security invariant; a missing parser must fail, including
+# when this test is invoked directly instead of through run-tests.sh.
+if ! "${WORKFLOW_PYTHON}" -c 'import yaml' >/dev/null 2>&1; then
+    _fail "the workflow checker requires Python 3 with PyYAML" \
+        "install python3-yaml (Debian/Ubuntu) or python3-pyyaml (Fedora)," \
+        "or install PyYAML in the interpreter selected by WORKFLOW_PYTHON"
+    finish
+    exit 1
+fi
 
 # --- parser -----------------------------------------------------------------
 #
@@ -225,13 +234,13 @@ assert_contains "parser reads the second job" \
 # --- 1. both workflows run the suite, with shellcheck installed first -------
 
 check_runs_suite() {
-    local label=$1 file=$2
+    local label=$1 file=$2 job=${3:-tests}
     local block
-    block=$(job_block "${file}" tests)
+    block=$(job_block "${file}" "${job}")
 
     if [[ -z "${block}" ]]; then
         _fail "${label} has a tests job" \
-            "no 'tests:' job found under jobs: in ${file#"${REPO_ROOT}"/}" \
+            "no '${job}:' job found under jobs: in ${file#"${REPO_ROOT}"/}" \
             "if the job was renamed, this test must be updated with it"
         return
     fi
@@ -256,6 +265,10 @@ check_runs_suite() {
             "an argument runs only part of it"
     fi
     assert_contains "${label} installs shellcheck" "${block}" "apt-get install -y shellcheck"
+    assert_contains "${label} installs PyYAML for the workflow checker" \
+        "${block}" "apt-get install -y shellcheck python3-yaml"
+    assert_contains "${label} uses the Python where apt installs PyYAML" \
+        "${block}" "WORKFLOW_PYTHON: /usr/bin/python3"
 
     # Running the suite is not the same as being gated by it. `continue-on-error`
     # leaves a red suite in a green job, and an `if:` on the step or the job can
@@ -290,6 +303,7 @@ check_runs_suite() {
 
 check_runs_suite "build.yml" "${BUILD_WF}"
 check_runs_suite "coverage-gate.yml" "${COVERAGE_WF}"
+check_runs_suite "nightly-compliance.yml" "${NIGHTLY_WF}" suite
 
 # --- 2. a red suite still blocks the image build ----------------------------
 
@@ -498,6 +512,25 @@ else
             "write-badges.sh on every pull request; a broadened condition also lets" \
             "a job with contents: write push to the status branch from a PR build"
     fi
+fi
+
+# --- 6. parsed run/shell values contain no Actions expressions --------------
+#
+# Expressions are expanded before the script starts. Read decoded YAML scalar
+# values: a raw-text opener count misses, for example, "\x24{{ ... }}".
+# The Python regressions exercise the same checker the real workflow scan uses.
+
+if "${WORKFLOW_PYTHON}" -B "${TEST_DIR}/test_workflow_expressions.py"; then
+    _pass "the workflow expression checker passes its regression cases"
+else
+    _fail "the workflow expression checker passes its regression cases"
+fi
+
+if expression_check=$("${WORKFLOW_PYTHON}" -B \
+    "${TEST_DIR}/lib/workflow_expressions.py" "${REPO_ROOT}/.github/workflows" 2>&1); then
+    _pass "${expression_check}"
+else
+    _fail "workflow run/shell values contain no Actions expressions" "${expression_check}"
 fi
 
 finish

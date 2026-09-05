@@ -46,14 +46,19 @@ jobs:
 
       # tests/test-shell-syntax.sh skips its shellcheck pass when the tool is
       # absent, which keeps the suite usable on a developer machine. CI is
-      # where that pass has to be enforced rather than skipped, so install it.
+      # where that pass has to be enforced. PyYAML is required by the workflow
+      # expression check, which fails if its parser is unavailable.
       - name: Install shellcheck
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y shellcheck python3-yaml
           shellcheck --version
 
       - name: Run shell test suite
+        env:
+          # Use the interpreter where apt installed PyYAML, even if another
+          # Python precedes it on the hosted runner's PATH.
+          WORKFLOW_PYTHON: /usr/bin/python3
         run: ./tests/run-tests.sh
 
   build_push:

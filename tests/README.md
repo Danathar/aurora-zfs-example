@@ -1,14 +1,18 @@
 # Tests
 
-Plain-bash tests for the shell this repository ships. No framework to install.
+Bash tests for the shell this repository ships, plus a Python/PyYAML workflow
+expression check. No third-party test framework is needed.
 
 ```bash
 ./tests/run-tests.sh                    # everything
 ./tests/run-tests.sh test-write-badges  # one file
 ```
 
-Requirements: bash 4+, `jq`, GNU `date`, `sed`. `shellcheck` is used when
-present and skipped when not.
+Requirements: bash 4+, `jq`, GNU `date`, `sed`, and Python 3 with PyYAML
+(`python3-yaml` on Debian/Ubuntu, `python3-pyyaml` on Fedora). The workflow check
+uses `python3` by default; `WORKFLOW_PYTHON` can select another interpreter with
+PyYAML installed. Missing Python or PyYAML fails the check. `shellcheck` is used
+when present and skipped when not.
 
 ## What is covered
 
@@ -20,7 +24,7 @@ present and skipped when not.
 | `test-shell-syntax.sh`      | `bash -n`, shebang and exec bit on every `*.sh`; `shellcheck -x` when installed            |
 | `test-coverage.sh`          | every shipped `*.sh` is declared covered by a named test or UNCOVERED with a reason        |
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
-| `test-ci-workflows.sh`      | CI still runs this suite, and neither workflow's path filter leaves a gap                  |
+| `test-ci-workflows.sh`      | CI still runs this suite with its dependencies, neither workflow's path filter leaves a gap, and workflow run/shell values contain no Actions expressions |
 | `test-auto-qa-tuning.sh`    | every workflow job is bounded by a timeout, and declared to the auto-QA manifest at the number the YAML actually says |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
@@ -51,10 +55,38 @@ suite could keep passing while the workflow that runs it was renamed, stripped
 of its `shellcheck` install, or unhooked from `build_push`. The path filters are
 the sharp case, because a workflow that stops running is not a workflow that
 fails — a `paths-ignore` that grows a third entry produces a *green* result on
-the very change that stopped being covered. It reads the YAML with an
-indentation-anchored parser rather than adding a dependency, and exercises that
-parser against a fixture first, so a reformat it cannot follow fails the suite
-instead of passing over an empty extraction.
+the very change that stopped being covered. The topology checks use the existing
+indentation-anchored extractors and exercise them against a fixture first, so
+an empty extraction fails the suite instead of passing without checking anything.
+
+The expression check uses a real YAML parser in `lib/workflow_expressions.py`,
+with regressions in `test_workflow_expressions.py`; both are invoked by
+`test-ci-workflows.sh`. It checks step `run` and `shell` values (including
+parallel groups), and workflow/job `defaults.run.shell`, after YAML folding,
+escape decoding and alias resolution. This catches flow mappings, multiline
+scalars, indentationless sequences and expressions whose `$` is escaped in the
+source. A job output or environment variable named `run` remains data.
+
+The checker composes YAML nodes with PyYAML's `SafeLoader`, retaining source
+locations and duplicate keys without constructing Python objects or converting
+the `on` key to a boolean. Both `.yml` and `.yaml` files are scanned. Malformed
+YAML, duplicate keys, merge keys, custom tags, recursive aliases and invalid
+shapes along executable paths fail the check. Ordinary anchors and aliases
+are supported, including a value defined as data and later used as a script.
+Diagnostics name both the consuming workflow path and the scalar's source
+location, which points to the definition for an alias.
+
+Executable scalars are checked as decoded text regardless of PyYAML's inferred
+tag. This avoids rejecting plain commands such as `yes` and `on`, which PyYAML
+tags as YAML 1.1 booleans but Actions reads as YAML 1.2 strings. Other scalar
+literals are also accepted in string fields by Actions' template reader.
+Mappings and sequences still fail, and a scalar's tag never exempts its text
+from the expression check. This does not validate whether a command exists or
+whether an empty script can execute successfully.
+
+This is an invariant over those executable fields, not a general Actions
+schema validator or a security audit of third-party action inputs, reusable
+workflows, composite actions, or how a script later uses its environment.
 
 What runs that test matters as much as what it asserts, and this is the part a
 first draft got wrong. A `pull_request` run executes the *head* branch's copy of
@@ -160,9 +192,10 @@ branches remain untested.
 ## In CI
 
 `.github/workflows/build.yml` runs the suite as a `Shell tests` job on every
-pull request and push, with `shellcheck` installed so that pass is enforced
-rather than skipped, and `build_push` has `needs: tests` so a red suite blocks
-the image build.
+pull request and push, with `shellcheck` and PyYAML installed, and `build_push`
+has `needs: tests` so a red suite blocks the image build. The coverage and
+nightly suite jobs install the same dependencies. All three select the system
+Python explicitly so it sees the PyYAML package installed by apt.
 
 `build.yml` sets `paths-ignore` for `README.md` and `docs/**` though, so a
 change touching only those starts no run there.

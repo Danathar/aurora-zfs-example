@@ -151,7 +151,7 @@ build_files/kernel-akmods.sh              kernel replacement and common akmods i
 build_files/post-check.sh                 final image validation for kernel and ZFS
 build_files/zfs.sh                        ZFS RPM installation and final initramfs generation
 ci/write-badges.sh                        derives the README status badge JSON
-tests/                                    plain-bash test suite for the shell above
+tests/                                    shell tests and Python/PyYAML workflow checks
 tests/e2e/                                manual end-to-end image build and rechunk check
 .github/workflows/build.yml               build and publish the container image
 .github/workflows/status-badges.yml       refresh the status badges on the `status` branch
