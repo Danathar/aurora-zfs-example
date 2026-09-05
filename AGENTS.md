@@ -54,6 +54,34 @@ pass:
 gh pr comment <N> --body "@codex review"
 ```
 
+**A request can be dropped, so silence is not a verdict.** Turnaround is
+normally two or three minutes. Once in this repo a request produced nothing for
+38 minutes, and an identical re-request answered in two — so a long silence is
+more likely a lost trigger than a slow review. Re-request once before drawing
+any conclusion from quiet.
+
+**Re-read the PR before merging, not just before pushing.** Reviews arrive while
+you are working, and a review of an earlier commit stays on the PR looking
+current. Two arrived unread here during a rewrite and were found only because
+somebody asked whether the PR was clear; one of them was a real bypass. Before
+merging, list the reviews and check the newest against `HEAD`:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<N>/reviews \
+  --jq '.[] | "\(.commit_id[0:10]) \(.submitted_at)"'
+git rev-parse --short=10 HEAD
+```
+
+Verify each finding against the code before acting on it — findings are written
+against the commit they were made on, and one made two revisions ago may already
+be fixed, or may no longer describe the design at all. Of three found that way
+here, one was real and two had already been closed by an intervening rewrite;
+the assertion counts quoted in their text were what gave that away.
+
+**A force-push orphans the reviews.** They stay visible but point at commits no
+longer on the branch. If you rewrite a branch that has been reviewed, say in a
+comment where each finding went, or the review record is silently lost.
+
 **Do not block on it.** Give it a couple of minutes, and if neither a review nor
 a 👍 has appeared, proceed and say so (a lone 👀 is not an answer). An empty `/issues/<N>/comments` is not
 evidence the bot stayed silent — check the three endpoints above. Never sit in a

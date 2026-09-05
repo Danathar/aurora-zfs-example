@@ -115,6 +115,23 @@ verify_rpm_payload() {
             fail "RPM verification found missing files for ${pkg}"
         fi
 
+        # Anything that is not a verification line is not evidence of a clean
+        # payload. rpm -V writes nine flag columns followed by a space; stderr
+        # is merged into this output, so a message such as "package kmod-zfs is
+        # not installed" arrives here too, and read as flags it contains no
+        # failure letter and passes. This is a fail-closed gate in front of
+        # signing, so a line it cannot parse fails rather than being skipped.
+        #
+        # That case is currently unreachable -- check_zfs_packages runs
+        # require_rpm "kmod-zfs" earlier in main() and exits if it is absent --
+        # but the gate should not depend on the order of calls in main() for a
+        # property nothing states. A new flag letter in a future rpm lands here
+        # too, and stopping to look at it is the right outcome.
+        if [[ ! "${line}" =~ ^[.?SM5DLUGTP]{9}([[:space:]]|$) ]]; then
+            printf '%s\n' "${verify_output}" >&2
+            fail "unrecognised rpm -V output for ${pkg}: ${line}"
+        fi
+
         # The first nine characters are rpm's verification flags, one column
         # each, in the order S M 5 D L U G T P. Example: ".....UGT." means only
         # user/group/time differ, which is acceptable here.
