@@ -290,6 +290,43 @@ EOF
 run_helper verify_rpm_payload kmod-zfs
 assert_eq "a '?' appearing in the path does not fail the check" 0 "${STATUS}"
 
+new_case payload-unparsed-line
+# rpm -V writes to stderr as well, and the caller merges it. "package X is not
+# installed" read as nine flag columns contains no failure letter, so before
+# this check it passed -- a fail-closed gate returning clean for a package that
+# is not there.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+package kmod-zfs is not installed
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "output that is not a verification line fails" 1 "${STATUS}"
+assert_contains "and says it could not be parsed" \
+    "${OUTPUT}" "unrecognised rpm -V output for kmod-zfs"
+
+new_case payload-short-flag-window
+# A line with fewer than nine flag columns is not a verification line either.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+..5  /usr/lib/modules/6.1.0-1.fc44.x86_64/extra/zfs/zfs.ko.xz
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "a short flag window fails rather than being read as flags" 1 "${STATUS}"
+
+new_case payload-attribute-marker-still-parses
+# The real format: nine columns, then the attribute marker column rpm uses for
+# config, doc and ghost files. This must keep parsing as an ordinary line.
+stub_command rpm
+exits rpm 1
+canned rpm <<'EOF'
+.....UGT.  c /etc/zfs/zed.d/zed.rc
+.......T.  d /usr/share/doc/zfs/README
+EOF
+run_helper verify_rpm_payload kmod-zfs
+assert_eq "marked config and doc files still read as clean" 0 "${STATUS}"
+
 # ---------------------------------------------------------------------------
 # require_single_rpm_version: the split-stack failure it exists to catch
 # ---------------------------------------------------------------------------
