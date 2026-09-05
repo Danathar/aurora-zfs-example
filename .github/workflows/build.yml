@@ -177,6 +177,7 @@ jobs:
       - name: Rechunk Image with Chunkah
         env:
           CHUNKAH_IMAGE: quay.io/coreos/chunkah:v0.6.0
+          TAGS: ${{ steps.metadata.outputs.tags }}
         run: |
           set -euo pipefail
 
@@ -228,7 +229,7 @@ jobs:
           rm -f "${archive}"
           echo "==> Disk usage after load" && df -h / /mnt
 
-          for tag in ${{ steps.metadata.outputs.tags }}; do
+          for tag in ${TAGS}; do
             podman tag "${chunked_image}" "${IMAGE_NAME}:${tag}"
           done
 
@@ -268,14 +269,17 @@ jobs:
       # manifest, so every tag is identical by construction.
       - name: Propagate tags from the pushed digest
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.metadata.outputs.tags }}
         run: |
           set -euo pipefail
-          digest="${{ steps.push.outputs.digest }}"
+          digest="${DIGEST}"
           if [ -z "${digest}" ]; then
             echo "push step did not expose a digest" >&2
             exit 1
           fi
-          for tag in ${{ steps.metadata.outputs.tags }}; do
+          for tag in ${TAGS}; do
             if [ "${tag}" = "${DEFAULT_TAG}" ]; then
               continue
             fi
@@ -291,14 +295,17 @@ jobs:
       # tag set.
       - name: Verify pushed tags share one digest
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.metadata.outputs.tags }}
         run: |
           set -euo pipefail
-          expected="${{ steps.push.outputs.digest }}"
+          expected="${DIGEST}"
           if [ -z "${expected}" ]; then
             echo "push step did not expose a digest" >&2
             exit 1
           fi
-          for tag in ${{ steps.metadata.outputs.tags }}; do
+          for tag in ${TAGS}; do
             actual=$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}")
             if [ "${actual}" != "${expected}" ]; then
               echo "Tag ${tag} resolves to ${actual}, expected ${expected}" >&2
@@ -321,7 +328,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         run: |
           cosign sign -y --key env://COSIGN_PRIVATE_KEY \
-            "${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
+            "${IMAGE_REGISTRY}/${IMAGE_NAME}@${DIGEST}"
         env:
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.push.outputs.digest }}
