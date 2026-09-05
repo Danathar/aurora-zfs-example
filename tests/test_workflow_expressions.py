@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 import unittest
 
-from lib.workflow_expressions import check_workflow
+from lib.workflow_expressions import check_workflow, location
 
 
 EXPRESSION = "${{ github.event.pull_request.title }}"
@@ -139,6 +139,39 @@ class WorkflowExpressionsTest(unittest.TestCase):
             source, "workflow.defaults.run.shell", "jobs.check.defaults.run.shell"
         )
 
+    def test_defaults_without_a_shell_are_not_executable(self):
+        # `defaults.run.working-directory` with no `shell:` is the common
+        # spelling, and `defaults` need not contain `run` at all. Neither shape
+        # reaches an executable value, so both must come back clean rather than
+        # tripping the mapping walk on a key that is not there. No workflow in
+        # .github/workflows uses `defaults`, so the CLI scan never sees these.
+        for block in (
+            "{run: {working-directory: build}}",
+            "{run: {}}",
+            "{}",
+        ):
+            with self.subTest(block=block):
+                source = workflow("- run: echo safe")
+                source = "defaults: " + block + "\n" + source
+                source = source.replace(
+                    "    steps:", "    defaults: " + block + "\n    steps:"
+                )
+                self.assertEqual([], check_workflow(source))
+
+    def test_defaults_without_a_shell_still_check_the_steps(self):
+        # The clean result above must come from there being no shell to check,
+        # not from `defaults` short-circuiting the rest of the job.
+        source = workflow("- run: " + EXPRESSION)
+        source = source.replace(
+            "    steps:", "    defaults: {run: {working-directory: build}}\n    steps:"
+        )
+        self.assert_executable(source, "jobs.check.steps[0].run")
+
+    def test_location_without_a_node_is_the_start_of_the_document(self):
+        # A diagnostic raised before any node is composed still has to name a
+        # position, because callers format it into `file:line:column:` text.
+        self.assertEqual("1:1", location(None))
+
     def test_alias_from_data_to_executable_values(self):
         for name in ("script", "1"):
             with self.subTest(name=name):
@@ -262,6 +295,23 @@ class WorkflowExpressionsTest(unittest.TestCase):
             )
             self.assertNotEqual(0, result.returncode)
             self.assertIn("No module named 'yaml'", result.stderr)
+
+    def test_cli_reports_a_workflow_it_cannot_decode(self):
+        # A file the scan cannot read is the one failure that must not be
+        # silent: skipping it would report "checked N workflow(s)" and exit 0
+        # over a workflow nothing looked at. Invalid UTF-8 is the reproducible
+        # form of that — a mode-000 file would not fail for a root test runner.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "safe.yml").write_text(workflow("- run: echo safe"), encoding="utf-8")
+            (root / "undecodable.yml").write_bytes(b"jobs:\n  check:\n    name: \xff\xfe\n")
+            result = subprocess.run(
+                [sys.executable, "-B", str(CHECKER), str(root)],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("undecodable.yml: cannot read workflow", result.stderr)
+            self.assertNotIn("2 workflow(s)", result.stdout)
 
 
 if __name__ == "__main__":
