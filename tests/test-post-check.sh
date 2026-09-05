@@ -83,6 +83,21 @@ run_helper() {
     STATUS=$?
 }
 
+# Source post-check.sh and evaluate a snippet against what it defined. Same
+# condition as run_helper -- $0 is not the script's path, so sourcing defines
+# main and the check_* stages without running them -- but the snippet gets to
+# redefine a stage before calling into it, which is how the order of main's
+# calls can be read without a real RPM database underneath.
+run_snippet() {
+    OUTPUT="$(
+        PATH="${case_dir}/bin:${PATH}" bash -c '
+            source "$1"
+            eval "$2"
+        ' test-post-check "${SCRIPT}" "$1" 2>&1
+    )"
+    STATUS=$?
+}
+
 # ---------------------------------------------------------------------------
 # The entry-point guard, in both directions
 # ---------------------------------------------------------------------------
@@ -109,6 +124,87 @@ assert_contains "main starts at the kernel tree check" \
     "${OUTPUT}" "post-check: checking kernel module tree"
 assert_contains "and stops on the first failure" \
     "${OUTPUT}" "expected exactly one kernel module directory, found 2"
+
+# ---------------------------------------------------------------------------
+# main: which stages run, in what order, and when the success line is printed
+# ---------------------------------------------------------------------------
+#
+# The case above proves main starts at check_kernel_tree and stops on the first
+# failure. It cannot say anything about the five stages behind it, because the
+# run it observes never reaches them -- and neither can a real image build,
+# which only reports that main exited 0.
+#
+# The order is a contract, not an arrangement. verify_rpm_payload's comment
+# argues that its unparseable-line branch "is currently unreachable --
+# check_zfs_packages runs require_rpm kmod-zfs earlier in main() and exits if
+# it is absent". That reasoning holds only while check_zfs_packages runs before
+# check_rpm_payloads. Move check_rpm_payloads up, or drop a stage, and nothing
+# in the tree notices: the build still passes, and the comment quietly becomes
+# false. check_zfs_modules must also precede check_zfs_userspace and
+# check_initramfs for a different reason -- it is what sets KERNEL's module
+# tree up via depmod, and both later stages read paths under that kernel.
+#
+# Each stage is replaced by a recorder, so this reads main's call sequence
+# without needing the RPM database, module tree or initramfs any of them wants.
+
+STAGE_RECORDERS='
+check_kernel_tree()   { printf "ran %s\n" check_kernel_tree; }
+check_zfs_packages()  { printf "ran %s\n" check_zfs_packages; }
+check_zfs_modules()   { printf "ran %s\n" check_zfs_modules; }
+check_zfs_userspace() { printf "ran %s\n" check_zfs_userspace; }
+check_initramfs()     { printf "ran %s\n" check_initramfs; }
+check_rpm_payloads()  { printf "ran %s\n" check_rpm_payloads; }
+'
+
+new_case main-runs-every-stage-in-order
+run_snippet "${STAGE_RECORDERS}"'
+main
+'
+assert_eq "main succeeds when every stage does" 0 "${STATUS}"
+assert_eq "main runs all six stages, in order, and reports success last" \
+    "ran check_kernel_tree
+ran check_zfs_packages
+ran check_zfs_modules
+ran check_zfs_userspace
+ran check_initramfs
+ran check_rpm_payloads
+post-check: all checks passed" \
+    "${OUTPUT}"
+
+new_case main-stops-at-a-failing-middle-stage
+# The existing guard case fails at the first stage, where "nothing after it
+# ran" is indistinguishable from "nothing after it was ever called". Failing in
+# the middle separates the two: the stages before it must have run, the ones
+# after it must not, and the success line must not be printed.
+run_snippet "${STAGE_RECORDERS}"'
+check_zfs_userspace() { fail "stage under test"; }
+main
+'
+assert_eq "a failing stage fails the run" 1 "${STATUS}"
+assert_contains "the stages before it still ran" \
+    "${OUTPUT}" "ran check_zfs_modules"
+assert_not_contains "the stages after it did not" \
+    "${OUTPUT}" "ran check_initramfs"
+assert_not_contains "and no payload check ran either" \
+    "${OUTPUT}" "ran check_rpm_payloads"
+assert_not_contains "a failed run does not report all checks passed" \
+    "${OUTPUT}" "all checks passed"
+
+new_case rpm-payloads-verifies-the-zfs-kmod
+# check_rpm_payloads is one call, and which package it names is the whole of
+# it: post-check.sh is the gate in front of signing, and kmod-zfs is the RPM
+# whose payload nothing downstream re-checks. Verifying some other package
+# here, or none, would still exit 0.
+run_snippet '
+verify_rpm_payload() { printf "verified %s\n" "$*"; }
+check_rpm_payloads
+'
+assert_eq "check_rpm_payloads succeeds when the payload verifies" 0 "${STATUS}"
+assert_contains "it verifies the kmod-zfs payload" "${OUTPUT}" "verified kmod-zfs"
+assert_eq "and verifies that one package only" \
+    "post-check: checking RPM file verification for critical kmods
+verified kmod-zfs" \
+    "${OUTPUT}"
 
 # ---------------------------------------------------------------------------
 # require_glob: the compressed-module case it exists for
