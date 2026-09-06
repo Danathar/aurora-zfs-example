@@ -159,6 +159,14 @@ assert_contains "--help documents --rechunk" "${STDOUT}" "run-e2e.sh --rechunk"
 assert_contains "--help documents --clean" "${STDOUT}" "run-e2e.sh --clean"
 assert_contains "--help documents --keep-going" "${STDOUT}" "run-e2e.sh --keep-going"
 assert_contains "--help documents E2E_ARCHIVE_DIR" "${STDOUT}" "E2E_ARCHIVE_DIR"
+# The E2E_ARCHIVE_DIR paragraph is the last one in the header, and a fixed
+# sed range once cut it mid-sentence -- after "Both default to podman's
+# storage", before the line naming /var/tmp. Asserting the alternative and
+# that the final line ends a sentence keeps the help honest about however
+# long the header grows.
+assert_contains "--help reaches the /var/tmp alternative" "${STDOUT}" "/var/tmp is the other"
+help_last_line="$(printf '%s\n' "${STDOUT}" | sed -e 's/[[:space:]]*$//' -e '/^$/d' | tail -n 1)"
+assert_eq "--help's last line ends a sentence" "." "${help_last_line: -1}"
 assert_eq "--help runs no podman" "" "${PODMAN_CALLS}"
 
 new_case unknown_option
