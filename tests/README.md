@@ -26,6 +26,7 @@ when present and skipped when not.
 | `test-docs-paths.sh`        | every repo path README.md and AGENTS.md name actually exists                               |
 | `test-ci-workflows.sh`      | CI still runs this suite with its dependencies, neither workflow's path filter leaves a gap, and workflow run/shell values contain no Actions expressions |
 | `test-auto-qa-tuning.sh`    | every workflow job is bounded by a timeout, and declared to the auto-QA manifest at the number the YAML actually says |
+| `test-e2e-preflight.sh`     | `tests/e2e/run-e2e.sh`'s option parsing, free-space preflight and `--clean`, with `podman` and `df` stubbed |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -131,6 +132,42 @@ Its `--rechunk` mode covers the one thing nothing else does: `post-check.sh` and
 `bootc container lint` are `RUN` steps, so they validate the image *before* the
 workflow hands it to Chunkah, and nothing re-checks the re-layered result before
 it is pushed and signed. See [`e2e/README.md`](e2e/README.md).
+
+Not being in the suite is not the same as being untestable, though, and
+`test-e2e-preflight.sh` covers the half of that script that costs nothing to
+run: everything it decides *before* the build. The build is the expensive part;
+option parsing, the free-space check and the `EXIT` trap are reached in
+milliseconds, and the only external commands involved are `podman` and `df`,
+both resolved through `PATH`. So they are stubbed — `podman` records its argv
+and fails `build`, `df` answers from a table of
+`path`/`device`/`available-KB` rows — and the script stops at that boundary.
+
+That table is what makes the free-space reasoning observable. `run-e2e.sh`
+probes the filesystems that actually receive data rather than the checkout, and
+deduplicates them by device, because two paths on one filesystem must not each
+be asked for 40G; a case that puts the graph root and the archive directory on
+one device asserts a single report line, and a case that separates them asserts
+two. The archive directory defaulting beside podman's storage rather than to
+`TMPDIR` is asserted the same way, with `TMPDIR` pointed somewhere else
+entirely — on a Fedora Atomic desktop that default is the difference between
+working and dying on a tmpfs. A graph root that does not exist yet, which is
+every machine that has never pulled an image, is asserted to be probed at its
+nearest existing ancestor.
+
+The cleanup assertions are the other half. `--clean` is the only thing here
+that deletes, and the promise in `e2e/README.md` is that it removes exactly the
+tags this run created and never prunes. A stubbed build that fails after the tag
+is recorded reaches the `EXIT` trap with one tag outstanding, so the test can
+compare the `rmi` argument against the `build` argument rather than merely
+observing that something was removed. Running without `--clean` asserts no
+`rmi` at all. The missing-`podman` case asserts the other trap property: it is
+installed before `ARCHIVE` and `LOAD_TMPDIR` have real values, so a failed
+prerequisite has to print its own message and exit rather than die on an unbound
+variable inside `cleanup`.
+
+Everything after the build — the checks against the built image, `--keep-going`,
+the rechunk itself — still needs a real image and is still covered only by
+running `run-e2e.sh` for real.
 
 ## The coverage gate
 
