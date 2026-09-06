@@ -1,15 +1,19 @@
 # Aurora developer image with ZFS
 
-[![build](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/danathar/aurora-zfs-simple/actions/workflows/build.yml)
-
+[![Build container image](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/build.yml)
+[![Coverage gate](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/coverage-gate.yml/badge.svg?branch=main)](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/coverage-gate.yml)
+[![Nightly compliance](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/nightly-compliance.yml/badge.svg?branch=main)](https://github.com/Danathar/aurora-zfs-simple/actions/workflows/nightly-compliance.yml)
 [![last good build](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FDanathar%2Faurora-zfs-simple%2Fstatus%2Flast-good-build-badge.json)](https://github.com/Danathar/aurora-zfs-simple/pkgs/container/aurora-zfs-simple)
-
 [![OpenZFS/kernel status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FDanathar%2Faurora-zfs-simple%2Fstatus%2Fakmods-badge.json)](AGENTS.md#dominant-failure-mode-kernel--zfs-akmod-skew)
-
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Danathar/aurora-zfs-simple)
+[![Maintenance assisted by Hivecommons Hive](https://img.shields.io/badge/maintenance%20assisted%20by-Hivecommons%20Hive-1f6feb)](https://github.com/hivecommons/hive)
+[![ACMM L4 Security-Aware](https://img.shields.io/badge/ACMM-L4%20Security--Aware-2da44e)](https://github.com/hivecommons/hive#acmm-levels)
+[![AI assisted](https://img.shields.io/badge/AI-assisted-d29922)](#about-this-project)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-The **build** badge is red whenever the last run failed. The other two say what
-that means for you:
+The three workflow badges are red whenever that workflow's last run on `main`
+failed. **Build container image** is the one that decides whether there is a new
+image at all; the two badges beside it say what a red build means for you:
 
 - **last good build** — when the published `:latest` image was actually built.
   This image is still installable and still boots; a red build just means it has
@@ -283,6 +287,34 @@ Your ZFS pools should import normally.
 ```bash
 cosign verify --key cosign.pub ghcr.io/danathar/aurora-zfs-simple:latest
 ```
+
+## About this project
+
+> [!NOTE]
+> This image was built with AI assistance and should be treated cautiously.
+>
+> It is a third-party image. It is not an official Aurora or Universal Blue
+> image, is not sanctioned by the Universal Blue project, is not an official
+> Fedora image, and is not sanctioned by the Fedora Project.
+>
+> It replaces the base image's kernel and installs out-of-tree ZFS modules, so
+> it is provided as-is, without any promise that it will be safe for your
+> systems, pools, or data. Review what it does before rebasing a machine to it,
+> and keep backups. The maintainer is not responsible for data loss, an
+> unbootable system, a failed build, or other consequences that may result from
+> using this image.
+
+> [!NOTE]
+> **Maintenance on this repository is assisted by [Hivecommons Hive](https://github.com/hivecommons/hive) at ACMM level 4.**
+>
+> Hive orchestrates a fleet of AI agents that continuously review this codebase.
+>
+> At **L4 (Security-Aware)** all agents may file issues, and the quality,
+> sec-check and CI agents may additionally open pull requests that carry a
+> `hold` label. The rest stay advisory: they report, they do not act. Every
+> change is still reviewed and merged by a human maintainer.
+>
+> Learn more: [Hive](https://github.com/hivecommons/hive) · [Hive Hub](https://hive.kubestellar.io) · [full ACMM policy matrix](https://github.com/hivecommons/hive/blob/v4/src/docs/acmm-policy-matrix.md)
 
 ## References
 
