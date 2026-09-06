@@ -27,6 +27,7 @@ when present and skipped when not.
 | `test-ci-workflows.sh`      | CI still runs this suite with its dependencies, neither workflow's path filter leaves a gap, and workflow run/shell values contain no Actions expressions |
 | `test-auto-qa-tuning.sh`    | every workflow job is bounded by a timeout, and declared to the auto-QA manifest at the number the YAML actually says |
 | `test-e2e-preflight.sh`     | `tests/e2e/run-e2e.sh`'s option parsing, free-space preflight and `--clean`, with `podman` and `df` stubbed |
+| `test-e2e-verify.sh`        | `tests/e2e/run-e2e.sh` after the build: `--rechunk`, the four checks, `--keep-going` and the report, with the `podman` stub succeeding the build |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
 Containerfile (a fixture file) and `skopeo inspect`, which a stub earlier on
@@ -165,9 +166,42 @@ installed before `ARCHIVE` and `LOAD_TMPDIR` have real values, so a failed
 prerequisite has to print its own message and exit rather than die on an unbound
 variable inside `cleanup`.
 
-Everything after the build — the checks against the built image, `--keep-going`,
-the rechunk itself — still needs a real image and is still covered only by
-running `run-e2e.sh` for real.
+`test-e2e-verify.sh` takes the other half. The reasoning that stopped the
+preflight tests at `podman build` applies to the build and to nothing after it:
+the rechunk, the four checks against the image and the report are `podman` calls
+and no other external command. So the same stub, told to *succeed* the build
+rather than fail it, runs the whole second half on the host in milliseconds
+against an image that never existed.
+
+What that reaches is the script's own accounting, which nothing else touches.
+`--keep-going` is the difference between one reported failure and all of them,
+and the `CHECKS`/`FAILURES` tally is the only place a check that quietly stopped
+running would show — so a case fails three checks at once and asserts all three
+are reported and totalled, and a case fails one without `--keep-going` and
+asserts the later checks did not merely go unreported but never ran, by looking
+for their `podman` calls.
+
+`--rechunk` is asserted against the workflow it rehearses: chunkah's image pin,
+`--max-layers 128`, `--prune /sysroot/` and both dropped `ostree` labels, plus
+the narrow `{{json .Config}}` read the script's comment explains as a
+`MAX_ARG_STRLEN` workaround. The mode's point is that the *re-layered* image is
+what gets checked, so the tests compare the tag each check ran against with the
+tag chunkah was told to produce; verifying the pre-rechunk image would leave
+`--rechunk` asserting nothing while still passing. The archive is a
+multi-gigabyte temp file, so a stubbed `podman load` failure asserts the `EXIT`
+trap removes it, and a `--clean` run after a rechunk asserts *both* tags are
+removed — a `CREATED_TAGS` append missed after the rechunk strands the larger of
+the two.
+
+The `containers.bootc` label is the one check that must not fail: a local
+`podman build` never has it, because the workflow applies it via
+`docker/metadata-action`. So its absence exits 0 and says nothing outside
+`--rechunk`, and prints the `note` line inside it, where a dropped label is a
+real regression signal. Both directions are asserted.
+
+What still needs a real image is what the checks inspect — whether ZFS userspace
+is actually present, whether there is exactly one module tree. These tests cover
+how the script reacts to those answers, not the answers themselves.
 
 ## The coverage gate
 
