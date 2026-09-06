@@ -30,6 +30,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=bind,from=akmods,src=/kernel-rpms,dst=/tmp/kernel-rpms \
     --mount=type=bind,from=akmods,src=/rpms/common,dst=/tmp/rpms/common \
     --mount=type=bind,from=akmods,src=/rpms/kmods,dst=/tmp/rpms/kmods \
+    --mount=type=bind,from=akmods,src=/rpms/ublue-os,dst=/tmp/rpms/ublue-os \
     --mount=type=bind,from=akmods-zfs,src=/rpms/kmods/zfs,dst=/tmp/rpms/kmods/zfs \
     /ctx/kernel-akmods.sh && \
     /ctx/zfs.sh
