@@ -61,7 +61,12 @@ while [[ "$#" -gt 0 ]]; do
         --clean) CLEAN=1 ;;
         --keep-going) KEEP_GOING=1 ;;
         -h | --help)
-            sed -n '2,40p' "${BASH_SOURCE[0]}"
+            # Print the whole leading comment block, however long it is. A
+            # fixed line range silently truncated the header once it grew past
+            # the range's end -- mid-sentence, in the E2E_ARCHIVE_DIR
+            # explanation -- so the end is found by shape, not by number:
+            # print from line 2 until the first line that is not a comment.
+            sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}"
             exit 0
             ;;
         *)
