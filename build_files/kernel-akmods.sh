@@ -60,6 +60,24 @@ dnf5 -y install /tmp/rpms/{common,kmods}/*xone*.rpm
 dnf5 -y install /tmp/rpms/{kmods,common}/*v4l2loopback*.rpm
 
 # Install the ublue akmods Secure Boot public key.
-mkdir -p /etc/pki/akmods/certs
-curl -f "https://github.com/ublue-os/akmods/raw/refs/heads/main/certs/public_key.der" --retry 3 -Lo /etc/pki/akmods/certs/akmods-ublue.der
+#
+# Extracted from the ublue-os-akmods-addons RPM shipped in the same akmods
+# image the kmods above were installed from -- not fetched over the network.
+# The previous curl of ublue-os/akmods@refs/heads/main was the one unpinned
+# external input in this build, and nothing tied what it returned to the kmods
+# the certificate is supposed to validate (#115). The addons RPM is built in
+# the same akmods CI run that compiled and signed those kmods, so the
+# certificate and the modules move together by construction.
+addons_rpm=$(find /tmp/rpms -name 'ublue-os-akmods-addons-*.rpm' -print -quit)
+if [[ -z "${addons_rpm}" ]]; then
+    echo "ERROR: no ublue-os-akmods-addons RPM under /tmp/rpms; cannot install the akmods Secure Boot certificate." >&2
+    exit 1
+fi
+cert_extract_dir=$(mktemp -d)
+rpm2cpio "${addons_rpm}" | (cd "${cert_extract_dir}" && cpio -idm --quiet ./etc/pki/akmods/certs/akmods-ublue.der)
+# A certificate that does not parse as DER must fail the build here, not
+# surface later as an unenrollable MOK on a user's machine.
+openssl x509 -inform der -in "${cert_extract_dir}/etc/pki/akmods/certs/akmods-ublue.der" -noout
+install -Dm0644 "${cert_extract_dir}/etc/pki/akmods/certs/akmods-ublue.der" /etc/pki/akmods/certs/akmods-ublue.der
+rm -rf "${cert_extract_dir}"
 ### aurora 02-install-common-kernel-akmods.sh ###
