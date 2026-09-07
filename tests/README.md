@@ -28,6 +28,7 @@ when present and skipped when not.
 | `test-auto-qa-tuning.sh`    | every workflow job is bounded by a timeout, and declared to the auto-QA manifest at the number the YAML actually says |
 | `test-e2e-preflight.sh`     | `tests/e2e/run-e2e.sh`'s option parsing, free-space preflight and `--clean`, with `podman` and `df` stubbed |
 | `test-e2e-verify.sh`        | `tests/e2e/run-e2e.sh` after the build: `--rechunk`, the four checks, `--keep-going` and the report, with the `podman` stub succeeding the build |
+| `test-ai-fix.sh`            | `.github/workflows/ai-fix.yml`: the `preflight` step's decision script, extracted and executed with `gh` stubbed, plus the permissions, triggers and action inputs that bound its `contents: write` grant |
 | `test-harness.sh`           | the harness itself: `lib/assert.sh`'s tally and every assertion's failing branch, and `run-tests.sh`'s dependency preflight, discovery, selection and failure reporting |
 
 `ci/write-badges.sh` is run as a real subprocess. Its only two inputs are a
@@ -123,6 +124,35 @@ of `jobs` or `untracked`, and, when tracked, at the number the workflow really
 declares. `untracked` is the `UNCOVERED` idiom from `test-coverage.sh`: not
 watching a job is a legitimate answer, but it has to be an answer, with the
 reason next to it.
+
+## The AI fix workflow
+
+`test-ai-fix.sh` covers `.github/workflows/ai-fix.yml`, which is the only
+workflow here that grants `contents: write` to a job an outside event can start.
+
+Its `preflight` step is 65 lines of shell inside a YAML string, so nothing in
+this repository executed it: not this suite (it is not a `*.sh` file), not
+`shellcheck`, not `bash -n`. Those lines are the access-control decision — bot
+sender, no credentials, fork head, hand off — and a wrong answer is silent
+either way. `run=no` where `yes` belongs reads as a quiet workflow; `run=yes`
+where `no` belongs starts an agent with push access on an event the workflow's
+own header says must never start one. So the test extracts the script from the
+parsed YAML and runs it, with a stub `gh` and the step's `env:` block supplied
+case by case, asserting both the `run=` output the `fix` job gates on and the
+run-summary text, which is a human's only explanation of a skip. An empty
+extraction fails rather than passing vacuously.
+
+The second half asserts the invariants that file argues for in prose, since
+prose does not fail. `pull_request_review` and `pull_request_review_comment`
+were removed from its triggers because they run the *head branch's* copy of a
+workflow, so a pull request could add its own trigger and reach that
+`contents: write` in the same pull request; nothing stopped either from being
+added back. The permission blocks are compared as whole sets rather than spot
+checked, `allowed_bots: ''` is read from parsed YAML so an absent key is not
+mistaken for an empty one, both actions must be pinned to a commit SHA, and
+`needs.preflight.outputs.run == 'yes'` is compared rather than searched for —
+broaden it and every check in the first half stops mattering while all of them
+still pass.
 
 ## End-to-end
 
