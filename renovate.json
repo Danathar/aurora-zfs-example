@@ -13,7 +13,8 @@
       "customType": "regex",
       "description": "Track stable Chunkah container releases",
       "managerFilePatterns": [
-        "/^\\.github/workflows/.*\\.ya?ml$/"
+        "/^\\.github/workflows/.*\\.ya?ml$/",
+        "/^tests/e2e/run-e2e\\.sh$/"
       ],
       "matchStrings": [
         "CHUNKAH_IMAGE:\\s+\"?quay\\.io/coreos/chunkah:(?<currentValue>v\\d+\\.\\d+\\.\\d+)\"?"
