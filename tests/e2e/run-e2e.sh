@@ -47,8 +47,8 @@ set -euo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${E2E_DIR}/../.." && pwd)"
 
-# Matches the workflow's pin. Kept in sync by hand; the workflow is the source
-# of truth and this only affects --rechunk.
+# Matches the workflow's pin. Renovate's regex manager tracks both this file
+# and the workflow (see renovate.json), so this stays in sync automatically.
 CHUNKAH_IMAGE="${CHUNKAH_IMAGE:-quay.io/coreos/chunkah:v0.6.0}"
 
 RECHUNK=0
